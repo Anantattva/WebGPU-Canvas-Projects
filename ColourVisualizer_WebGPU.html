@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>
+      Colour Visualizer : WebGPU
+    </title>
+    <style>
+      body {
+        margin: 0;
+        height: 100dvh;
+        width: 100dvw;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        background: rgba(0, 255, 255, 0.1);
+        gap: 7%;
+        text-align: center;
+      }
+      #title {
+        position: relative;
+        top: 2%;
+        text-align: center;
+        font-size: 6dvw;
+        font-family: 'Times New Roman';
+      }
+      #hueCanvas {
+        background: white;
+        box-shadow: 0 0 12px 1dvw rgba(0, 0, 0, 0.2);
+        height: 5dvh;
+        width: 70dvw;
+      }
+      #hueSlider {
+        position: absolute;
+        height: 3dvh;
+        width: 3dvw;
+        filter: drop-shadow(0 0 10px rgba(255, 255, 255, 1));
+      }
+      #hueSlider::before {
+        content: "";
+        position: absolute;
+        background: black;
+        top: 0;
+        left: 0;
+        height: 100%;
+        width: 100%;
+        clip-path: polygon(0% 50%, 50% 100%, 100% 50%, 50% 0%);
+      }
+      #alpha {
+        background-image: linear-gradient(90deg, white, rgba(0, 0, 0, 0.75));
+        box-shadow: 0 0 12px 1dvw rgba(0, 0, 0, 0.2);
+        width: 70dvw;
+        height: 5dvh;
+      }
+      #alphaSlider {
+        position: absolute;
+        height: 3dvh;
+        width: 3dvw;
+        filter: drop-shadow(0, 0, 10px rgba(255, 255, 255, 0.3));
+      }
+      #alphaSlider::before {
+        content: "";
+        position: absolute;
+        background: black;
+        top: 0;
+        left: 0;
+        height: 100%;
+        width: 100%;
+        clip-path: polygon(0% 50%, 50% 100%, 100% 50%, 50% 0%);
+      }
+      #outputCanvas {
+        background: white;
+        box-shadow: 0 0 12px 1dvw rgba(0, 0, 0, 0.3);
+        height: 70dvw;
+        width: 70dvw;
+      }
+      #outputSelector {
+        position: absolute;
+        background-image: radial-gradient(white, black);
+        height: 3dvw;
+        width: 3dvw;
+        border: 1px solid black;
+        border-radius: 3dvh;
+        box-shadow: 0 0 8px 0 rgba(255, 255, 255, 0.5);
+      }
+      #outputText {
+        font-size: 6dvw;
+        font-weight: bold;
+        font-family: 'Times New Roman';
+      } 
+      #outputValue {
+        background: white;
+        display: grid;
+        place-items: center;
+        height: 4dvh;
+        width: 70dvw;
+        box-shadow: 0 0 6px 1dvw rgba(0, 0, 0, 0.2);
+        font-size: 4dvw;
+        letter-spacing: 0.75dvw;
+        text-align: center;
+        font-weight: 450;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="title">
+      Colour Visualizer : WebGPU
+    </div>
+    <canvas id="hueCanvas"></canvas>
+    <div id="hueSlider"></div>
+    <div id="alpha"></div>
+    <div id="alphaSlider"></div>
+    <canvas id="outputCanvas"></canvas>
+    <div id="outputSelector"></div>
+    <div id="outputText">Output::</div> 
+    <div id="outputValue">rgba(255, 255, 255, 1)</div>
+    <!-- Hue Script -->
+    <script>
+      // ।। ॐ नमः शिवाय ।। \\
+      // ++ Enlightened Mystic JS ++ \\
+      // ++ state holder ++ \\
+      const state = {
+        hue: 180,
+        saturation: 50,
+        lightness: 50,
+        alphaValue: 0.5,
+        r: null,
+        g: null,
+        b: null,
+        isRGB: true
+      };
+      let dh = window.innerHeight;
+      let dw = window.innerWidth;
+      let dvh = dh / 100;
+      let dvw = dw / 100;
+      // !! hue !! \\
+      // !! setup !! \\
+      const hueCanvas = document.getElementById('hueCanvas');
+      const hueSlider = document.getElementById('hueSlider');
+      const hueBrush = hueCanvas.getContext('2d');
+      // !! resolution !! \\
+      hueCanvas.height = 100;
+      hueCanvas.width = 500;
+      // !! paint !! \\
+      const gradient = hueBrush.createLinearGradient(0, 0, 500, 0);
+      gradient.addColorStop(0, 'rgb(255, 0, 0)');
+      gradient.addColorStop(0.166, 'rgb(255, 255, 0)');
+      gradient.addColorStop(0.333, 'rgb(0, 255, 0)');
+      gradient.addColorStop(0.5, 'rgb(0, 255, 255)');
+      gradient.addColorStop(0.666, 'rgb(0, 0, 255)');
+      gradient.addColorStop(0.813, 'rgb(255, 0, 255)');
+      gradient.addColorStop(1, 'rgb(255, 0, 0)');
+      hueBrush.fillStyle = gradient;
+      hueBrush.fillRect(0, 0, 500, 100);
+      // !! hue slider !! \\
+      const hueCanvasRect = hueCanvas.getBoundingClientRect();
+      const hueSliderRect = hueSlider.getBoundingClientRect();
+      const hueSliderMid = hueCanvasRect.y + ((hueCanvasRect.height - hueSliderRect.height)/2);
+      hueSlider.style.transform = `translate3d(0, ${hueSliderMid}px, 0)`;
+      // !! slider function !! \\
+      function slideHue() {
+        let isDragging = false;
+        let startX;
+        hueSlider.addEventListener('touchstart', (e) => {
+          // << set data >> \\
+          isDragging = true;
+          // hueSlider.setPointerCapture(e.pointerId); // in-built; retains pointer even if cursor/finger moves out of hueSlider;
+        });
+        document.addEventListener('touchmove', (e) => {
+          // << safety fallback >> \\
+          if (!isDragging) return;
+          e.preventDefault();
+          // << get data >> \\
+          let posX = e.touches[0].clientX - hueCanvasRect.left;
+          // << disable at edges >> \\
+          if (posX > hueCanvasRect.width) {
+            posX = hueCanvasRect.width;
+          } else if (posX < 0) {
+            posX = 0;
+          }
+          const finalX = (hueCanvasRect.left + posX) - (dw)/2;
+          // << slide >> \\
+          hueSlider.style.transform = `translate3d(${finalX}px, ${hueSliderMid}px, 0)`;
+          // << update hue >> \\
+          state.hue = Math.round((posX/hueCanvasRect.width)*360);
+          // console.log(state.hue);
+        }, { passive : false });
+        document.addEventListener('touchend', () => {
+          isDragging = false;
+        });
+      }
+      slideHue();
+    </script>
+    <!-- Alpha Script -->
+    <script>
+      // !! alpha (transparency) !! \\
+      // !! get elements !! \\
+      const alpha = document.getElementById('alpha')
+      const alphaSlider = document.getElementById('alphaSlider')
+      const alphaRect = alpha.getBoundingClientRect();
+      const alphaSliderRect = alphaSlider.getBoundingClientRect();
+      // !! position !! \\
+      const alphaSliderMid = alphaRect.top + ((alphaRect.height - alphaSliderRect.height)/2);
+      alphaSlider.style.transform = `translate3d(0, ${alphaSliderMid}px, 0)`;
+      // !! slider function !! \\
+      function slideAlpha() {
+        let isDragging = false;
+        let startX;
+        alphaSlider.addEventListener('touchstart', (e) => {
+          // << set data >> \\
+          isDragging = true;
+        });
+        document.addEventListener('touchmove', (e) => {
+          // << safety fallback >> \\
+          if (!isDragging) return;
+          e.preventDefault();
+          // << get data >> \\
+          let posX = e.touches[0].clientX - alphaRect.left;
+          // << disable at edges >> \\
+          if (posX > alphaRect.width) {
+            posX = alphaRect.width;
+          } else if (posX < 0) {
+            posX = 0;
+          }
+          const finalX = (alphaRect.left + posX) - (dw)/2;
+          // << slide >> \\
+          alphaSlider.style.transform = `translate3d(${finalX}px, ${alphaSliderMid}px, 0)`;
+          // << update alphaValue >> \\
+          state.alphaValue = Math.round((posX/alphaRect.width)*100)/100;
+          // console.log(state.alphaValue);
+        }, { passive : false });
+        document.addEventListener('touchend', () => {
+          isDragging = false;
+        });
+      }
+      slideAlpha();
+    </script>
+    <!-- Saturation & Lightness Script -->
+    <script>
+      // !! output !! \\
+      // !! get elements !! \\
+      const outputCanvas = document.getElementById('outputCanvas');
+      const outputSelector = document.getElementById('outputSelector');
+      const outputValue = document.getElementById('outputValue');
+      // !! get data !! \\
+      const outputCanvasRect = outputCanvas.getBoundingClientRect();
+      const outputSelectorRect = outputSelector.getBoundingClientRect();
+      // !! position !! \\
+      const outputSelectorMid = outputCanvasRect.top + ((outputCanvasRect.height - outputSelectorRect.height)/2);
+      outputSelector.style.transform = `translate3d(0, ${outputSelectorMid}px, 0)`;
+      // !! slider function !! \\
+      function slideOutputSelector() {
+        let isDragging = false;
+        let startX, startY;
+        outputSelector.addEventListener('touchstart', (e) => {
+          // << set data >> \\
+          isDragging = true;
+        });
+        document.addEventListener('touchmove', (e) => {
+          // << safety fallback >> \\
+          if (!isDragging) return;
+          e.preventDefault();
+          // << get data >> \\
+          let posX = e.touches[0].clientX - outputCanvasRect.left;
+          let posY = e.touches[0].clientY - outputCanvasRect.top;
+          // << disable at edges >> \\
+          if (posX > outputCanvasRect.width) {
+            posX = outputCanvasRect.width;
+          } else if (posX < 0) {
+            posX = 0;
+          }
+          if (posY > outputCanvasRect.height) {
+            posY = outputCanvasRect.height;
+          } else if (posY < 0) {
+            posY = 0;
+          }
+          const finalX = (outputCanvasRect.left + posX) - (dw)/2;
+          const finalY = (outputCanvasRect.top + posY) - (outputSelectorRect.height/2);
+          // << slide >> \\
+          outputSelector.style.transform = `translate3d(${finalX}px, ${finalY}px, 0)`;
+          // << update >> \\
+          state.saturation = Math.round((posX/outputCanvasRect.width)*100);
+          state.lightness = Math.round(((outputCanvasRect.height-posY)/outputCanvasRect.height)*100);
+          // console.log("Saturation: ", state.saturation, "Lightness: ", state.lightness);
+        }, { passive : false });
+        document.addEventListener('touchend', () => {
+          isDragging = false;
+        });
+      }
+      slideOutputSelector();
+    </script>
+    <!-- Output updation -->
+    <script>
+      // !! conversion !! \\
+      function hslToRgb(h, s, l) {
+        // << convert to 0 - 1 >> \\
+        s /= 100;
+        l /= 100;
+        // << get chroma >> \\
+        const c = (1-Math.abs(2*l-1))*s;
+        // << get secondary component >> \\
+        const x = c*(1-Math.abs(((h/60) % 2)-1));
+        // << get adjusting lightness >> \\
+        const m = l - c/2;
+        // << check sectors >> \\
+        let r = 0; g = 0; b = 0;
+        if (0 <= h && h < 60) {
+          r = c; g = x; b = 0
+        } else if (60 <= h && h < 120) {
+          r = x; g = c; b = 0;
+        } else if (120 <= h && h < 180) {
+          r = 0; g = c; b = x;
+        } else if (180 <= h && h < 240) {
+          r = 0; g = x; b = c;
+        } else if (240 <= h && h < 300) {
+          r = x; g = 0; b = c;
+        } else if (300 <= h && h < 360) {
+          r = c; g = 0; b = x;
+        }
+        // << normalize back >> \\
+        const finalR = Math.round((r+m)*255);
+        const finalG = Math.round((g+m)*255);
+        const finalB = Math.round((b+m)*255);
+        // << get result >> \\
+        state.r = finalR;
+        state.g = finalG;
+        state.b = finalB;
+      }
+      // !! draw !! \\
+      function updateOutputView() {
+        hslToRgb(state.hue, state.saturation, state.lightness);
+        // << background >> \\
+        outputValue.style.background = `rgba(${state.r}, ${state.g}, ${state.b}, ${state.alphaValue})`;
+        // << text value >> \\
+        if (state.isRGB) {
+          outputValue.textContent = `rgba(${state.r}, ${state.g}, ${state.b}, ${state.alphaValue})`;
+        } else {
+          outputValue.textContent = `hsla(${state.hue}, ${state.saturation}, ${state.lightness}, ${state.alphaValue})`;
+        }
+      }
+      hueSlider.addEventListener('touchmove', updateOutputView);
+      alphaSlider.addEventListener('touchmove', updateOutputView);
+      outputSelector.addEventListener('touchmove', updateOutputView);
+      // !! switch !! \\
+      outputValue.addEventListener('click', () => {
+        if (state.isRGB) {
+          state.isRGB = false;
+          outputValue.textContent = `hsla(${state.hue}, ${state.saturation}, ${state.lightness}, ${state.alphaValue})`;
+        } else {
+          state.isRGB = true;
+          outputValue.textContent = `rgba(${state.r}, ${state.g}, ${state.b}, ${state.alphaValue})`;
+        }
+      });
+    </script>
+    <!-- WebGPU Script -->
+    <script>
+      // !! setup & initialize !! \\
+      const outputBrush = outputCanvas.getContext('webgpu');
+      const wgpuData = {
+        adapter: null,
+        device: null,
+        format: null,
+        shaderCode: null,
+        shaderModule: null,
+        pipeline: null,
+        encoder: null,
+        view: null,
+        pass: null
+      };
+      outputCanvas.width = 500;
+      outputCanvas.height = 500;
+      async function __initialize__() {
+        const gpu = navigator.gpu;
+        if (!gpu) {
+          throw new Error("GPU unavailable!");
+        }
+        wgpuData.format = gpu.getPreferredCanvasFormat();
+        try {
+          wgpuData.adapter = await gpu.requestAdapter();
+          wgpuData.device = await wgpuData.adapter.requestDevice();
+        } catch (error) {
+          console.log("Error found. Adapter or device not found: ", error);
+        }
+        outputBrush.configure({
+          device: wgpuData.device,
+          format: wgpuData.format
+        });
+        updateOutput();
+      }
+      window.addEventListener('load', () => {
+        __initialize__();
+      });
+      // !! shader & compile !! \\
+      function getShaderAndModule() {
+        const shaderCode = `
+          struct VertexOutput {
+            @builtin(position) position: vec4f,
+            @location(0) uv: vec2f
+          };
+          fn hslaToRgba(hsla: vec4f) -> vec4f {
+            let h: f32 = hsla.x;
+            let s: f32 = hsla.y / 100.0;
+            let l: f32 = hsla.z / 100.0;
+            let a: f32 = hsla.w;
+            
+            let a_factor = s * min(l, 1.0 - l);
+            let n: vec3f = vec3f(0.0, 8.0, 4.0);
+            
+            let structural_k: vec3f = n + vec3f(h / 30.0);
+            let k: vec3f = structural_k - 12.0 * floor(structural_k / 12.0);
+            
+            let min_value: vec3f = min(k - vec3f(3.0), vec3f(9.0) - k);
+            let clamp_value: vec3f = max(vec3f(-1.0), min(min_value, vec3f(1.0)));
+            
+            let rgb: vec3f = vec3f(l) - vec3f(a_factor) * clamp_value;
+            return vec4f(rgb, a);
+          }
+          
+          @vertex
+          fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+            var pos = array<vec2f, 3>(
+              vec2f(-1.0, -1.0),
+              vec2f(3.0, -1.0),
+              vec2f(-1.0, 3.0)
+            );
+            var output: VertexOutput;
+            output.position = vec4f(pos[vertexIndex], 0.0, 1.0);
+            
+            output.uv = pos[vertexIndex]*0.5 + 0.5;
+            return output;
+          }
+          
+          @fragment
+          fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
+            let h = ${state.hue}.0;
+            let a = 1.0;
+            
+            let ts = uv.x * 100.0;
+            let tl = uv.y * 100.0;
+            
+            let input_color = vec4f(h, ts, tl, a);
+            return hslaToRgba(input_color);
+          }
+        `;
+        wgpuData.shaderCode = shaderCode;
+        wgpuData.shaderModule = wgpuData.device.createShaderModule({ code : shaderCode });
+      }
+      // !! pipeline !! \\
+      function startRendering() {
+        const pipeline = wgpuData.device.createRenderPipeline({
+          layout: 'auto',
+          vertex: {
+            module: wgpuData.shaderModule,
+            entryPoint: 'vs_main'
+          },
+          fragment: {
+            module: wgpuData.shaderModule,
+            entryPoint: 'fs_main',
+            targets: [{
+              format: wgpuData.format
+            }]
+          },
+          primitive: {
+            topology: 'triangle-list'
+          }
+        });
+        wgpuData.pipeline = pipeline;
+      }
+      // !! encoder !! \\
+      function setupEncoderAndView() {
+        wgpuData.view = outputBrush.getCurrentTexture().createView();
+        wgpuData.encoder = wgpuData.device.createCommandEncoder();
+      }
+      // !! pass !! \\
+      function issuePass() {
+        const pass = wgpuData.encoder.beginRenderPass({
+          colorAttachments: [{
+            view: wgpuData.view,
+            clearValue: { r: 0, g: 0, b: 0, a: 0},
+            loadOp: 'clear',
+            storeOp: 'store'
+          }]
+        });
+        pass.setPipeline(wgpuData.pipeline);
+        pass.draw(3);
+        pass.end();
+        wgpuData.pass = pass;
+      }
+      // !! draw call !! \\
+      function drawOutput() {
+        wgpuData.device.queue.submit([ wgpuData.encoder.finish() ]);
+      }
+      // !! unified function !! \\
+      function updateOutput() {
+        getShaderAndModule();
+        startRendering();
+        setupEncoderAndView();
+        issuePass();
+        drawOutput();
+        // console.log("Done!! No bugs found!!");
+      }
+      // !! attach listeners !! \\
+      hueSlider.addEventListener('touchmove', () => {
+        updateOutput();
+      });
+      outputSelector.addEventListener('touchmove', () => {
+        updateOutput();
+      });
+    </script>
+    <script>
+      // ।। ॐ नमः शिवाय ।। \\
+      // Performance Testing \\
+      // Refresh Rates \\
+      let frameCount = 0;
+      let lastTime = performance.now();
+      function logFPS(currentTime) {
+        frameCount++;
+        const elapsed = currentTime - lastTime;
+        if (elapsed >= 1000) {
+          const fps = Math.round((frameCount * 1000)/elapsed);
+          frameCount = 0;
+          lastTime = currentTime;
+          console.log(`Current frame rate: ${fps}fps.`);
+          }
+          requestAnimationFrame(logFPS);
+      }
+      requestAnimationFrame(logFPS); 
+    </script>
+  </body>
+</html>
