@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>
+      Cust Radial Gradients Math
+    </title>
+    <style>
+      body {
+        margin: 0;
+        height: 100dvh;
+        width: 100dvw;
+        display: flex;
+        gap: 3%;
+        flex-direction: column;
+        align-items: center;
+        background: rgba(255, 0, 255, 0.2);
+      }
+      h1 {
+        font-size: 6dvw;
+        font-family: 'Times New Roman';
+        text-align: center;
+      }
+      #canvas1 {
+        background: white;
+        height: 25dvh;
+        width: 25dvh;
+        border-radius: 25dvh;
+        border: 1px solid black;
+        box-shadow: 0 0 12px 1dvw rgba(0, 0, 0, 0.1);
+      }
+      #canvas2 {
+        background: white;
+        height: 25dvh;
+        width: 25dvh;
+        border-radius: 25dvh;
+        border: 1px solid black;
+        box-shadow: 0 0 12px 1dvw rgba(0, 0, 0, 0.1);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Custom Radial Gradients Math</h1>
+    <!-- Custom Math -->
+    <canvas id="canvas1"></canvas>
+    <!-- In-built Method -->
+    <canvas id="canvas2"></canvas>
+    <script>
+      // ।। ॐ नमः शिवाय ।। \\
+      // ++ Gyaani JS ++ \\
+      
+      // !! get elements !! \\
+      /** @type {HTMLCanvasElement} */
+      const canvas1 = document.getElementById('canvas1');
+      /** @type {CanvasRenderingContext2D} */
+      const brush1 = canvas1.getContext('2d');
+      
+      // !! resolution: 500×500 !! \\
+      canvas1.width = 500;
+      canvas1.height = 500;
+      brush1.translate(250, 250); // center brush;
+      
+      // !! colours !! \\
+      const start1 = performance.now();
+      const c1 = 'rgba(0, 255, 100, 1)';
+      const c2 = 'rgba(255, 255, 0, 0.8)';
+      // !! the math !! \\
+      // !! weighted averages/linear interpolation !! \\
+      for (let k=500; k>=0; k--) {
+        // !! get relative averages !! \\
+        const r = (((500-k)*0)+(k*255))/500;
+        const g = (((500-k)*255)+(k*255))/500;
+        const b = (((500-k)*100)+(k*0))/500;
+        const a = (((500-k)*1)+(k*0.8))/500;
+        // !! combine colour !! \\
+        const colour = `rgba(${r}, ${g}, ${b}, ${a})`;
+        brush1.beginPath();
+        brush1.fillStyle = colour;
+        brush1.arc(0, 0, k/2, 0, Math.PI*2);
+        brush1.fill();
+      }
+      const end1 = performance.now();
+      console.log(`Time for custom math: ${end1 - start1}ms.`);
+    </script>
+    <script>
+      // ।। ॐ नमः शिवाय ।। \\
+      // ++ Gyaani JS ++ \\
+      
+      // !! get elements !! \\
+      /**
+       * @type {HTMLCanvasElement} canvas2
+       * @type {CanvasRenderingContext2D} brush2
+      */
+      const canvas2 = document.getElementById('canvas2');
+      const brush2 = canvas2.getContext('2d');
+      // !! resolution: 500×500 !! \\
+      canvas2.width = 500;
+      canvas2.height = 500;
+      brush2.translate(250, 250); // center brush;
+      
+      // !! in-built method !! \\
+      // !! ctx.createRadialGradient(startX, startY, startRadius, endX, endY, endRadius) !! \\
+      const start2 = performance.now();
+      /** @type {CanvasGradient} gradient
+      */
+      const gradient = brush2.createRadialGradient(0, 0, 0, 0, 0, 250);
+      // !! in-built: ctx.addColorStop(destination, colour) !! \\
+      gradient.addColorStop(0, c1);
+      gradient.addColorStop(1, c2);
+      // !! draw !! \\
+      brush2.beginPath();
+      brush2.fillStyle = gradient;
+      brush2.arc(0, 0, 250, 0, Math.PI*2);
+      brush2.fill();
+      const end2 = performance.now();
+      console.log(`Time for in-built method: ${end2 - start2}ms.`);
+    </script>
+  </body>
+</html>
