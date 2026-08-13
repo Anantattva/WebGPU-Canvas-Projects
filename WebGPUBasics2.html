@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>
+      WebGPU Basics : 2
+    </title>
+    <style>
+      body {
+        margin: 0;
+      }
+      #brahmaand {
+        position: absolute;
+        height: 100vh;
+        width: 100vw;
+        background: black;
+        display: flex;
+        flex-direction: column;
+        gap: 2%;
+        align-items: center;
+        text-align: center;
+      }
+      h3 {
+        text-align: center;
+        font-size: 6vw;
+        font-family: 'Times New Roman';
+        color: white;
+      }
+      #gpuCanvas {
+        width: 90%;
+        height: 85%;
+        background: white;
+        box-shadow: rgba(255, 255, 255, 0.44);
+        border: 0.33vmin solid rgba(0, 0, 0, 0.33)
+      }
+    </style>
+  </head>
+  <body>
+    <div id="brahmaand">
+      <h3><< WebGPU Basics 2 >></h3>
+      <canvas id="gpuCanvas" width="500" height="700"></canvas>
+    </div>
+    <script>
+      // <<{{ Enlightened Mystic JS }}>> \\
+      // {{ Source of Truth }} \\
+      let myGPU;
+      let adapterTattva, deviceTattva, formatTattva;
+      let canvas, brush;
+      // ++ awakens WebGPU ++ \\
+      async function awakeWebGPU() {
+        // << check is GPU is born >> \\
+        if (!navigator.gpu) {
+          throw new Error("WebGPU is unborn!");
+        }
+        // << initialize chitta >> \\
+        myGPU = navigator.gpu; // synchronous
+        adapterTattva = await myGPU.requestAdapter(); // asynchronous
+        deviceTattva = await adapterTattva.requestDevice(); // asynchronous
+        formatTattva = myGPU.getPreferredCanvasFormat(); // synchronous
+        // << setup karma >> \\
+        console.log("++!! WebGPU Awakened !!++");
+      }
+      // << initialize manas >> \\
+      function awakeCanvas() {
+        // << get samskaras >> \\
+        canvas = document.getElementById('gpuCanvas');
+        brush = canvas.getContext('webgpu');
+        // << setup karma >> \\
+        brush.configure({
+          device: deviceTattva,
+          format: formatTattva
+        });
+        console.log("++!! Canvas Awakened !!++");
+      }
+      // .. Life .. \\
+      const shaderCode = `
+        @vertex
+        fn soulVertexShader(
+          @builtin(vertex_index)
+          vertexIndex: u32) -> @builtin(position) vec4<f32> {
+          if (vertexIndex == 0u) {
+            return vec4<f32>(0.5, 0.5, 0.0, 1.0);
+          }
+          if (vertexIndex == 1u) {
+            return vec4<f32>(-0.5, 0.5, 0.0, 1.0);
+          }
+          if (vertexIndex == 2u) {
+            return vec4<f32>(-0.5, -0.5, 0.0, 1.0);
+          }
+          return vec4<f32>(0.5, -0.5, 0.0, 1.0);
+        }
+        @fragment
+        fn soulfragmentShader() -> @location(0) vec4<f32> {
+          return vec4<f32>(1.0, 0.0, 1.0, 1.0);
+        }
+        `;
+      // .. Life formation .. \\
+      function formLife(shaderCode) {
+        const shaderModule = deviceTattva.createShaderModule({
+          code: shaderCode
+        });
+        console.log("++!! WGSL Code Compiled !!++");
+        return shaderModule;
+      }
+      // .. Life karma .. \\
+      function formLifeKarma(shaderModule) {
+        const pipeline = deviceTattva.createRenderPipeline({
+          layout: "auto",
+          vertex: {
+            module: shaderModule,
+            entryPoint: "soulVertexShader"
+          },
+          fragment: {
+            module: shaderModule,
+            entryPoint: "soulfragmentShader",
+            targets: [{
+              format: formatTattva
+            }]
+          },
+          primitive: {
+            topology: 'line-list'
+          }
+        });
+        console.log("++!! Pipeline Established !!++");
+        return pipeline;
+      }
+      // .. Life seed .. \\
+      function formLifeSeed() {
+        const encoder = deviceTattva.createCommandEncoder();
+        console.log("++!! Encoder Logged in !!++");
+        const textureView = brush.getCurrentTexture().createView();
+        console.log("++!! Texture Ready !!++");
+        return {encoder, textureView};
+      }
+      // .. Life Birth .. \\
+      function formLifeBirth(pipeline) {
+        console.log("A");
+        const seed = formLifeSeed();
+        console.log("B");
+        const encoder = seed.encoder;
+        console.log("C");
+        const textureView = seed.textureView;
+        console.log("D");
+        const pass = encoder.beginRenderPass({
+          colorAttachments: [{
+            view: textureView,
+          clearValue: {
+            r: 1,
+            g: 1,
+            b: 1,
+            a: 1
+          },
+          loadOp: "clear",
+          storeOp: "store"
+          }]
+        });
+        console.log("++!! Canvas Cleared !!++");
+        pass.setPipeline(pipeline);
+        pass.draw(4);
+        pass.end();
+        console.log("++!! Draw Call Issued !!++");
+        deviceTattva.queue.submit([
+          encoder.finish()
+        ]);
+        console.log("++!! LIFE BORN !!++");
+      }
+      // << Life >> \\
+      async function consciousness() {
+        await awakeWebGPU();
+        awakeCanvas();
+        const shaderModule = formLife(shaderCode);
+        const pipeline = formLifeKarma(shaderModule);
+        formLifeBirth(pipeline);
+      }
+      consciousness();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>
+      Circle
+    </title>
+    <style>
+      body {
+        margin: 0;
+      }
+      #space {
+        position: absolute;
+        margin: 0;
+        height: 100dvh;
+        width: 100dvw;
+        background: rgba(255, 0, 244, 0.23);
+        text-align: center;
+        display: grid;
+        place-items: center;
+      }
+      #world {
+        position: absolute;
+        margin: 0;
+        height: 100dvh;
+        width: 100dvw;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="space">
+      <canvas id="world"></canvas>
+    </div>
+    <script>
+      // ++ Enlightened Mystic JS ++ \\
+      // ++ Setup ++ \\
+      const dpr = window.devicePixelRatio || 1;
+      let dvh = window.innerHeight * dpr;
+      let dvw = window.innerWidth * dpr;
+      let dh = dvh / 100;
+      let dw = dvw / 100;
+      
+      // ++ SOURCE OF TRUTH ++ \\
+      class Shiva {
+        constructor() {
+          // !! class setup !! \\
+          this.world = document.getElementById('world');
+          this.gpu = navigator.gpu;
+          // !! karma manifestation !! \\
+          window.addEventListener('resize', () => {
+            this.resetWorldSizeDynamically();
+          });
+          // !! Manifest Duality !! \\
+          this.meditate();
+        }
+        async create() {
+          // << check if wgpu available >> \\
+          if (!this.gpu) {
+            throw new Error("WGPU not here!");
+          }
+          // << gpu karma >> \\
+          this.adapter = await this.gpu.requestAdapter();
+          if (!this.adapter) {
+            throw new Error("No GPU adapter in subconscious!");
+          }
+          this.format = this.gpu.getPreferredCanvasFormat();
+          this.world.height = dvh * dpr;
+          this.world.width = dvw * dpr;
+          console.log("GPU & world karma written-off!");
+          // << adapter karma >> \\
+          this.device = await this.adapter.requestDevice();
+          if (!this.device) {
+            throw new Error("No GPU device found!");
+          }
+          console.log("Adapter karma written-off!");
+          // << brush karma >> \\
+          this.brush = this.world.getContext('webgpu');
+          this.brush.configure({
+            device: this.device,
+            format: this.format
+          });
+          console.log("WGPU Conscious!");
+          this.texture = this.brush.getCurrentTexture();
+          this.view = this.texture.createView();
+          console.log("Brush karma written-off!", this);
+        }
+        resetWorldSizeDynamically() {
+          // << update dimensions >> \\
+          dvh = window.innerHeight * dpr;
+          dvw = window.innerWidth * dpr;
+          dh = dvh / 100;
+          dw = dvw / 100;
+          console.log(`dvh: ${dvh}px; dvw: ${dvw}px; dh: ${dh}px; dw: ${dw}px; dpr: ${dpr}`);
+          // << update canvas >> \\
+          this.world.height = dvh;
+          this.world.width = dvw;
+          // << reconfigure brush >> \\
+          if (this.brush) {
+            this.brush.configure({
+              device: this.device,
+              format: this.format
+            });
+          }
+        }
+        async meditate() {
+          await this.create();
+          this.tatpurusha = new Tatpurusha(this);
+          this.sadyojata = new Sadyojata(this);
+          this.vamadeva = new Vamadeva(this);
+        }
+      }
+      
+      class Tatpurusha {
+        constructor(shivaBeing) {
+          // !! class setup !! \\
+          this.shiva = shivaBeing;
+        }
+        manifestWGSL() {
+          const shaderCode = `
+          
+          `;
+          console.log("WGSL manifest!");
+        }
+        manifestCompiledWGSL(wgsl) {
+          return this.shiva.device.createShaderModule({ code : wgsl });
+          console.log("WGSL compiled!");
+        }
+        manifestDirectBinary() {
+          const wgsl = `
+            // VERTEX SHADER
+            @vertex
+            fn vertex(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+              // 4 corners of a square (triangle strip)
+              let x = f32(i / 2) * 2.0 - 1.0;
+              let y = f32(i % 2) * 2.0 - 1.0;
+              return vec4f(x, y, 0.0, 1.0);
+            }
+            // FRAGMENT SHADER
+            @fragment
+            fn fragment(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+              // Convert pixel position to center-based coordinates
+              let res = vec2f(${dvw}, ${dvh}); // width,  height
+              let aspect = res.x / res.y;
+              var uv = (pos.xy / res) * 2.0 - 1.0;
+              uv.y /= aspect;
+              // Distance from center (0 = center, 1 = edge)
+              let dist = length(uv);
+              // If outside circle, discard
+              if (dist > 0.2) {
+                discard;
+              }
+              // Red circle
+              return vec4f(1.0, 0.3, 0.65, 1.0);
+            }`;
+          console.log("WGSL manifest!");
+          return this.shiva.device.createShaderModule({ code : wgsl });
+          console.log("WGSL compiled");
+        }
+      }
+      
+      class Sadyojata {
+        constructor(shivaBeing) {
+          // !! class setup !! \\
+          this.shiva = shivaBeing;
+        }
+        manifestPipeline(shaderModule) {
+          this.pipeline = this.shiva.device.createRenderPipeline({
+            layout: 'auto',
+            vertex: {
+              module: shaderModule,
+              entryPoint: "vertex"
+            },
+            fragment: {
+              module: shaderModule,
+              entryPoint: "fragment",
+              targets: [{
+                format: this.shiva.format
+              }]
+            },
+            primitive: {
+              topology: 'triangle-strip'
+            }
+          });
+          console.log("Pipeline manifest!");
+          return this.pipeline;
+        }
+        manifestEncoder() {
+          this.encoder = this.shiva.device.createCommandEncoder();
+        }
+        manifestPass() {
+          this.pass = this.encoder.beginRenderPass({
+            colorAttachments: [{
+              view: this.shiva.view,
+              clearValue: {
+                r: 1,
+                g: 1,
+                b: 1,
+                a: 1,
+              },
+              loadOp: 'clear',
+              storeOp: 'store'
+            }]
+          });
+          console.log("Pass Manifest");
+          return this.pass;
+        }
+        manifestRendering() {
+          // << issue pass >> \\
+          this.pass.setPipeline(this.pipeline);
+          this.pass.draw(4);
+          this.pass.end();
+          console.log("Draw call issued!");
+          // << end >> \\
+          this.shiva.device.queue.submit([
+            this.encoder.finish()
+          ]);
+          console.log("DONE!!");
+        }
+      }
+      
+      class Vamadeva {
+        constructor(shivaBeing) {
+          // !! class setup !! \\
+          this.shiva = shivaBeing;
+          // !! karma setup !! \\
+          this.draw();
+        }
+        draw() {
+          // << get module from tatpurusha >> \\
+          const shaderModule = this.shiva.tatpurusha.manifestDirectBinary();
+          // << get rendering from sadyojata >> \\
+          const pipeline = this.shiva.sadyojata.manifestPipeline(shaderModule);
+          this.shiva.sadyojata.manifestEncoder();
+          const pass = this.shiva.sadyojata.manifestPass(pipeline);
+          this.shiva.sadyojata.manifestRendering();
+        }
+      }
+      
+      // !! Instantiate !! \\
+      window.addEventListener('load', () => {
+        const shiva = new Shiva();
+      });
+    </script>
+    <!--
+    // ++ KEY NOTES ++ \\
+    let: immutable in WGSL;
+    var: mutable in WGSL;
+    
+    multiple x coordinate by aspect or divive y by aspect to get circle instead of ellipse;
+    
+    WGSL allows swiggle operations:
+    let pos = vec4f(1.0, 0.0, 0.0, 1.0);
+    this defaults: (x, y, z, w);
+    
+    one can access them by order:
+    pos.x = 1.0;
+    pos.xy = vec2f(1.0, 0.0);
+    pos.xyz = vec3f(1.0, 0.0, 0.0);
+    
+    one can even flip orders:
+    pos.yz = vec2f(0.0, 0.0);
+    pos.zyx = vec3f(0.0, 0.0, 1.0);
+    
+    one can even use types like rgba or stpq BUT never mix them;
+    -->
+  </body>
+</html>

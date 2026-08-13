@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>
+      WebGPU - Getting Started
+    </title>
+    <style>
+      body {
+        margin: 0;
+      }
+      #site {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 255, 255, 0.1);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 3%;
+      }
+      h3 {
+        font-size: 4vw;
+      }
+      #gpuCanvas {
+        box-shadow: 0 0 0.4vh 0.2vh rgba(0, 0, 0, 0.62);
+        width: 60vw;
+        height: 40vh;
+        background: white;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="site">
+      <h3><< WebGPU - Getting Started >></h3>
+      <canvas id="gpuCanvas" width="600" height="400"></canvas>
+    </div>
+    <script>
+      // ==<< Enlightened Mystic JS >>= \\
+      // {{ Awaken WebGPU }} \\
+      async function awakeWebGPU() {
+        if (!navigator.gpu) {
+          throw new Error("GPU not alive on this browser!");
+        }
+        let gpu = navigator.gpu;
+        let adapter = await gpu.requestAdapter();
+        let myDevice = await adapter.requestDevice();
+        let myFormat = await gpu.getPreferredCanvasFormat();
+        let canvas = document.getElementById('gpuCanvas');
+        let brush = canvas.getContext('webgpu');
+        brush.configure({
+          device: myDevice,
+          format: myFormat
+        });
+        console.log("WebGPU Awakened!");
+        // the actual GPU thing \\
+        const shaderModule = myDevice.createShaderModule({
+          code: shaderCode
+        }); // compiles WGSL; the first GPU specific object; WAAH!!;;
+        console.log("Congrats Programmer: Shader compiled!")
+        const pipeline = myDevice.createRenderPipeline({
+          layout: "auto",
+          vertex: {
+            module: shaderModule,
+            entryPoint: 'vertexShaderMain'
+          },
+          fragment: {
+            module: shaderModule,
+            entryPoint: 'fragmentShaderMain',
+            targets: [{
+              format: myFormat
+            }]
+          },
+          primitive: {
+            topology: 'triangle-list'
+          }
+        }); // the real thing; shaderModule is a mere engine; pipeline is the whole car;
+        console.log("Congrats Programmer: Pipeline created!");
+        const encoder = myDevice.createCommandEncoder(); // this bro is like the notebook for writing GPU commands;
+        console.log("Encoder established!");
+        const textureView = brush.getCurrentTexture().createView();
+        console.log("Texture embedded!!");
+        // now clear canvas \\
+        const pass = encoder.beginRenderPass({
+          colorAttachments: [{
+            view: textureView,
+            clearValue: {
+              r: 1,
+              g: 1,
+              b: 1,
+              a: 1
+            },
+            loadOp: "clear",
+            storeOp: "store"
+          }],
+        }); // place all object data inside colorAttachments;
+        console.log("Render pass started!");
+        // pipeline \\
+        pass.setPipeline(pipeline);
+        pass.draw(3);
+        pass.end();
+        console.log("Very good: Draw call issued!");
+        // FINALLY EXECUTE \\
+        myDevice.queue.submit([
+          encoder.finish()
+        ]);
+        console.log("Commands Submitted Programmer!! Done!!");
+      }
+      awakeWebGPU();
+      // {{ setup graphics recipe }} \\
+      // this code is mere recipe, not the output food yet; 
+      const shaderCode = `
+        @vertex
+        fn vertexShaderMain(
+          @builtin(vertex_index)
+          vertexIndex : u32) -> @builtin(position) vec4<f32> {
+          if (vertexIndex == 0u) {
+            return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+          }
+          if (vertexIndex == 1u) {
+            return vec4<f32>(0.5, 0.0, 0.0, 1.0);
+          }
+          return vec4<f32>(0.0, 0.5, 0.0, 1.0);
+        }
+        @fragment
+        fn fragmentShaderMain() -> @location(0) vec4<f32> {
+          return vec4<f32>(0.0, 1.0, 1.0, 1.0);
+        }
+      `;
+    </script>
+  </body>
+</html>

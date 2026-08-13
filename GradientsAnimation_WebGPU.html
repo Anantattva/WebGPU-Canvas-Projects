@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>
+      Gradients Animation : WebGPU
+    </title>
+    <style>
+      body {
+        margin: 0;
+        height: 100dvh;
+        width: 100dvw;
+      }
+      h1 {
+        position: absolute;
+        z-index: 5;
+        left: 50dvw;
+        transform: translateX(-50%);
+        text-align: center;
+        font-size: 4dvw;
+      }
+      canvas {
+        position: absolute;
+        z-index: 1;
+        margin: 0;
+        height: 100dvh;
+        width: 100dvw;
+      }
+    </style>
+  </head>
+  <!-- ।। ॐ नमः शिवाय ।। -->
+  <body>
+    <h1>Gradients Animation in WebGPU</h1>
+    <canvas id="world"></canvas>
+    <!-- WebGPU Code -->
+    <script>
+      // ।। ॐ नमः शिवाय ।। \\
+      // ++ Enlightened Mystic JS ++ \\
+      // !! state holder !! \\
+      const dpr = window.devicePixelRatio;
+      const viewHeight = window.innerHeight;
+      const viewWidth = window.innerWidth;
+      
+      const wgpu = {
+        canvas: null,
+        format: null,
+        adapter: null,
+        device: null,
+        brush: null, /* WebGPU context */
+        shaderCode: null,
+        shaderModule: null,
+        pipeline: null,
+        uniformBuffer: null,
+        bindGroup: null,
+        view: null,
+        encoder: null,
+        pass: null
+      };
+      // !! get elements !! \\
+      /** @type {HTMLCanvasElement} */
+      const world = document.getElementById('world');
+      wgpu.canvas = world;
+      world.width = viewWidth * dpr;
+      world.height = viewHeight * dpr;
+      
+      /** @type {GPUCanvasContext} */
+      const brush = world.getContext('webgpu');
+      wgpu.brush = brush;
+      
+      // !! gpu setup !! \\
+      /**
+       * Initializes the WebGPU context by requesting a format, adapter & device and then configuring context brush
+       * @async
+       * @function __initialize__
+       * @returns {Promise<void>}
+       * @throws {error} falls back safely if adapter or device not found
+      */
+      async function __initialize__() {
+        const start1 = performance.now();
+        if (!navigator.gpu) {
+          throw new Error("GPU unavailable!");
+        }
+        const gpu = navigator.gpu;
+        /** @type {GPUTextureFormat} */
+        wgpu.format = gpu.getPreferredCanvasFormat();
+        try {
+          /** @type {GPUAdapter} */
+          wgpu.adapter = await gpu.requestAdapter();
+          /** @type {GPUDevice} */
+          wgpu.device = await wgpu.adapter.requestDevice();
+        } catch (error) {
+          console.log("Error occured. Adapter or device unavailable.", error);
+          return; // quit execution;
+        }
+        wgpu.brush.configure({
+          device: wgpu.device,
+          format: wgpu.format
+        });
+        const end1 = performance.now();
+        console.log(`Time for initialization setup: ${end1 - start1}ms.`);
+      }
+      
+      // !! shader & compilation !! \\
+      /**
+       * Takes a shader code and compiles it into a shader module
+       * @function createAndCompileShader
+       * @return {null}
+       */
+      function createAndCompileShader() {
+        // << check cache >> \\
+        if (wgpu.shaderCode !== null && wgpu.shaderModule !== null) return; // reuse same code & module;
+        wgpu.shaderCode = `
+          struct GradientColours {
+            inner_colour: vec4f,
+            outer_colour: vec4f
+          };
+          
+          struct VertexOutput {
+            @builtin(position) position: vec4f,
+            @location(0) uv: vec2f
+          };
+          
+          @vertex
+          fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+            var pos = array<vec2f, 3>(
+              vec2f(-1.0, -1.0),
+              vec2f(3.0, -1.0),
+              vec2f(-1.0, 3.0)
+            );
+            
+            var output: VertexOutput;
+            output.position = vec4f(pos[vertexIndex], 0.0, 1.0);
+            output.uv = pos[vertexIndex]*0.5+0.5;
+            return output;
+          }
+          
+          @group(0) @binding(0) var<uniform> uniforms: GradientColours; // in-built UNIFORM BUFFER declaration
+          
+          @fragment
+          fn fs_main(input: VertexOutput) -> @location(0) vec4f {
+            let aspect = ${viewWidth / viewHeight};
+            let center = vec2f(0.5, 0.5/aspect);
+            
+            var usable_uv = input.uv;
+            usable_uv.y /= aspect;
+            let dist = distance(usable_uv, center);
+            if (dist > 0.4) {
+              discard;
+            }
+            let final_colour = mix(uniforms.inner_colour, uniforms.outer_colour, smoothstep(0.0, 0.5, dist)); // smoothstep() create smooth natural ease-in-out colour blend ratio;
+            return final_colour;
+          }
+        `;
+        /** @type {GPUShaderModule} */
+        wgpu.shaderModule = wgpu.device.createShaderModule({ code: wgpu.shaderCode });
+      }
+      
+      // !! render pipeline !! \\
+      function setupPipelineAndBuffers() {
+        // << check cache >> \\
+        if (wgpu.pipeline !== null) return; // reuse same pipeline
+        // << pipeline >> \\
+        /** @type {GPURenderPipeline} */
+        wgpu.pipeline = wgpu.device.createRenderPipeline({
+          layout: 'auto',
+          vertex: { module: wgpu.shaderModule, entryPoint: 'vs_main'},
+          fragment: { module: wgpu.shaderModule, entryPoint: 'fs_main', targets: [{ format: wgpu.format }] },
+          primitive: { topology: 'triangle-list' }
+        });
+        // << buffer >> \\
+        // << we have 2 colours of vec4f; one float = 4 bytes, so size = 2*4*4 = 32 bytes >> \\
+        /** @type {GPUUniformBuffer} */
+        wgpu.uniformBuffer = wgpu.device.createBuffer({
+          size: 32,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+        // << bind group >> \\
+        // << this maps our slot @group(0) @binding(0) to our physical GPU component >> \\
+        /** @type {GPUBindGroup} */
+        wgpu.bindGroup = wgpu.device.createBindGroup({
+          layout: wgpu.pipeline.getBindGroupLayout(0), // @group(0); slot 0; in-built method
+          entries: [{
+            binding: 0, // @binding(0)
+            resource: { buffer: wgpu.uniformBuffer }
+          }]
+        });
+      }
+      
+      // !! colouring function !! \\
+      /**
+       * @function setGradient
+       * @param {number[]} inner colour [r, g, b, a] ranging from 0.0 to 1.0
+       * @param {number[]} outer colour [r, g, b, a] ranging from 0.0 to 1.0
+       * @return {void}
+       */
+      function setGradient(inner, outer) {
+        // << packs colours into a binary array >> \\
+        const data = new Float32Array([...inner, ...outer]);
+        // << passes into device queue >> \\
+        wgpu.device.queue.writeBuffer(wgpu.uniformBuffer, 0, data);
+      }
+      
+      // !! draw function !! \\
+      function encodePassAndDraw() {
+        // << get encoder & view >> \\
+        /** @type {GPUCommandEncoder} */
+        wgpu.encoder = wgpu.device.createCommandEncoder();
+        /** @type {GPUTextureView} */
+        wgpu.view = wgpu.brush.getCurrentTexture().createView();
+        // << get pass >> \\
+        /** @type {GPURenderPassEncoder} */
+        wgpu.pass = wgpu.encoder.beginRenderPass({
+          colorAttachments: [{
+            view: wgpu.view,
+            clearValue: { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
+            loadOp: 'clear',
+            storeOp: 'store'
+          }]
+        });
+        // << issue draw call >> \\
+        wgpu.pass.setPipeline(wgpu.pipeline);
+        wgpu.pass.setBindGroup(0, wgpu.bindGroup);
+        wgpu.pass.draw(3);
+        wgpu.pass.end();
+        // << submit >> \\
+        wgpu.device.queue.submit([ wgpu.encoder.finish() ]);
+      }
+      
+      // !! unified function !! \\
+      /**
+       * @function drawGradient
+       * @param {number[]} innerColour
+       * @param {number[]} outerColour
+       * @return {void}
+       */
+       function drawGradient(innerColour, outerColour) {
+         const start2 = performance.now();
+         createAndCompileShader();
+         // console.log("A");
+         setupPipelineAndBuffers();
+         // console.log("B");
+         setGradient(innerColour, outerColour);
+         // console.log("C");
+         encodePassAndDraw();
+         // console.log("D");
+         const end2 = performance.now();
+         console.log(`Time for one draw cycle: ${end2 - start2}ms.`);
+       }
+       
+       const c1 = [1.0, 0.3, 1.0, 0.4];
+       const c2 = [0, 1.0, 0.5, 0.3];
+       // !! attach listener !! \\
+       window.addEventListener('DOMContentLoaded', async () => {
+         await __initialize__();
+         drawGradient(c1, c2);
+      });
+    </script>
+    <!-- Animation -->
+    <script>
+      // ।। ॐ नमः शिवाय ।। \\
+      class Animation {
+        constructor() {
+          this.lastTime = performance.now();
+          requestAnimationFrame((currentTime) => {this.animate(currentTime)});
+        }
+        animate(currentTime) {
+          const elapsed = currentTime - this.lastTime;
+          if (elapsed >= 50.00) {
+            this.lastTime = currentTime - (elapsed % 1000);
+            const pulse = Math.abs(Math.sin(currentTime*0.001));
+            const animateC1 = [pulse, 0.0, 0.4, 0.3];
+            const animateC2 = [0.0, 1-pulse, 0.5, 0.3];
+            drawGradient(animateC1, animateC2);
+          }
+          requestAnimationFrame((currentTime) => {this.animate(currentTime)});
+        }
+      }
+      window.addEventListener('click', () => {
+        const animation = new Animation();
+      }, { once : true });
+    </script>
+  </body>
+</html>

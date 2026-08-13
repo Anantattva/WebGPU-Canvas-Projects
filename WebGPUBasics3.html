@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>
+      WebGPU Basics : 3
+    </title>
+    <style>
+      body {
+        margin: 0;
+      }
+      #world {
+        position: absolute;
+        margin: 0;
+        padding: 0;
+        height: 100dvh;
+        width: 100dvw;
+        background: rgba(0, 255, 255, 0.3);
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      #title {
+        text-align: center;
+        font-size: 4vw;
+      }
+      #gpuCanvas {
+        position: absolute;
+        top: 10vh;
+        height: 85vh;
+        width: 85vw;
+        background: white;
+        box-shadow: 0 0 0.4vmin 0.1vmin #000;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="world">
+      <h5 id="title"><< WebGPU Basics : 3 >></h5>
+      <canvas id="gpuCanvas"></canvas>
+    </div>
+    <script>
+      // ++ Our Genius JS ++ \\
+      // ++ Setup ++ \\
+      let dvh = window.innerHeight;
+      let dh = dvh / 100;
+      let dvw = window.innerWidth;
+      let dw = dvw / 100;
+      
+      function updateDynamicLayout() {
+        dvh = window.innerHeight;
+        dh = dvh / 100;
+        dvw = window.innerWidth;
+        dw = dvw / 100;
+      }
+      
+      let wgpu, myAdapter, myDevice, myFormat, brush;
+      const gpu = navigator.gpu;
+      let dpr = window.devicePixelRatio || 1;
+      const canvas = document.getElementById('gpuCanvas');
+      
+      function resizeCanvas() {
+        const rect = canvas.getBoundingClientRect();
+        dpr = window.devicePixelRatio || 1;
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        
+        if (brush && myDevice) {
+          brush.configure({
+            device: myDevice,
+            format: myFormat
+          });
+        }
+      }
+      resizeCanvas();
+      
+      // ++ Reconfiguration ++ \\
+      window.addEventListener('load', () => {
+        resizeCanvas();
+      });
+      window.addEventListener('resize', () => {
+        updateDynamicLayout();
+        resizeCanvas();
+      });
+      
+      // ++ Awake WebGPU ++ \\
+      async function awakeWGPU() {
+        if (!gpu) {
+          throw new Error("WGPU not here!!");
+        }
+        myFormat = gpu.getPreferredCanvasFormat();
+        myAdapter = await gpu.requestAdapter();
+        myDevice = await myAdapter.requestDevice();
+        console.log("WGPU awakened");
+        brush = canvas.getContext('webgpu');
+        brush.configure({
+          device: myDevice,
+          format: myFormat
+        });
+        console.log("WGPU responding!!");
+      }
+      
+      function drawTriangle() {
+        const shaderCode =
+          `
+          @vertex
+          fn mainVertexShader(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+            const position = array<vec2<f32>, 4>(
+            // 4 vertices
+            vec2<f32>(0.5, 0.5), vec2<f32>(-0.5, 0.5), vec2<f32>(0.5, -0.5), vec2<f32>(-0.5, -0.5)
+            );
+            return vec4<f32>(position[i], 0.0, 1.0);
+          }
+          @fragment
+          fn mainFragmentShader() -> @location(0) vec4<f32> {
+            return vec4<f32>(1.0, 0.7, 0.7, 1.0);
+          }
+          `;
+          console.log("WGSL DONE!!");
+          
+          const shaderModule = myDevice.createShaderModule({
+            code: shaderCode
+          });
+          console.log("WGSL compiled", shaderModule);
+          
+          const pipeline = myDevice.createRenderPipeline({
+            layout: "auto",
+            vertex: {
+              module: shaderModule,
+              entryPoint: "mainVertexShader"
+            },
+            fragment: {
+              module: shaderModule,
+              entryPoint: "mainFragmentShader",
+              targets: [{
+                format: myFormat
+              }]
+            },
+            primitive: {
+              topology: 'triangle-strip'
+            }
+          });
+          console.log("Pipeline assembled", pipeline);
+          
+          const encoder = myDevice.createCommandEncoder();
+          console.log("Encoder ready", encoder);
+          
+          const texture = brush.getCurrentTexture();
+          const myView = texture.createView();
+          console.log("View Ready!!", texture, myView);
+          
+          const pass = encoder.beginRenderPass({
+            colorAttachments: [{
+              view: myView,
+              clearValue: {
+                r: 1,
+                g: 1,
+                b: 0,
+                a: 1
+              },
+            loadOp: 'clear',
+            storeOp: 'store'
+            }]
+          });
+          console.log("Pass Ready, Canvas cleared!!", pass);
+          
+          pass.setPipeline(pipeline);
+          pass.draw(4);
+          pass.end();
+          console.log("Draw call issued!!");
+          
+          myDevice.queue.submit([
+            encoder.finish()
+          ]);
+          console.log("DONE!!");
+      }
+      
+      // ++ Instantiate ++ \\
+      window.addEventListener('load', async () => {
+        await awakeWGPU();
+        drawTriangle();
+      });
+      //drawTriangle();
+      /*
+      // ++ THE KEY ++ \\
+      • Instantiate GPU first,
+      • Write WGSL,
+      • Compile code: device.createShaderModule(),
+      • Assemble pipeline: device.createRenderPipeline(),
+      • Establish encoder & view: device.createCommandEncoder(), brush.getCurrentTexture().createView(),
+      • Ready rendering: encoder.beginRenderPass(),
+      • pass to pipeline: pass.setPipeline(pipeline), pass.draw(), pass.end(),
+      • issue command to queue: device.queue.submit([
+          encoder.finish()
+        ]);
+      */
+      
+      /*
+      // ++ DeepSeek KEY NOTES ++ \\
+      1. GPU SETUP:
+        - navigator.gpu → get adapter → request device
+        - Get canvas context: canvas.getContext('webgpu')
+        - Configure context with device & format
+      2. SHADER COMPILATION:
+        - Write WGSL code (vertex + fragment)
+        - device.createShaderModule({ code: wgsl })
+      3. PIPELINE ASSEMBLY:
+        - device.createRenderPipeline({
+          layout: 'auto',
+          vertex: { module, entryPoint },
+          fragment: { module, entryPoint, targets: [{ format }] },
+          primitive: { topology: 'triangle-list' | 'triangle-strip' }
+        })
+      4. COMMAND ENCODING (EACH FRAME):
+        - Create encoder: device.createCommandEncoder()
+        - Get texture view: context.getCurrentTexture().createView()
+        - Start render pass: encoder.beginRenderPass({ colorAttachments: [{ view, clearValue, loadOp, storeOp }] })
+        - Set pipeline: pass.setPipeline(pipeline)
+        - Draw: pass.draw(vertexCount)  // or pass.drawIndexed()
+        - End pass: pass.end()
+        - Submit: device.queue.submit([encoder.finish()])
+      5. ANIMATION LOOP:
+        - Use requestAnimationFrame()
+        - Update uniforms (using buffers) NOT shader recompilation
+        - Re-encode commands each frame
+      */
+    </script>
+  </body>
+</html>

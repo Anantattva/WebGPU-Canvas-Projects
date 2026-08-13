@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>
+      Array Buffers in WebGPU
+    </title>
+    <style>
+      body {
+        margin: 0;
+      }
+      #world {
+        position: absolute;
+        height: 100dvh;
+        width: 100dvw;
+        background: rgba(0, 240, 200, 0.2);
+      }
+      #earth {
+        position: absolute;
+        height: 100dvh;
+        width: 100dvw;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="world">
+      <canvas id="earth"></canvas>
+    </div>
+    <script>
+      // ।। ॐ नमः शिवाय ।। \\
+      // ++ Enlightened Mystic JS ++ \\
+      
+      // ++ Global Setup ++ \\
+      const gpucanvas = document.getElementById('earth');
+      const brush = gpucanvas.getContext('webgpu');
+      const gpu = navigator.gpu;
+      const format = gpu.getPreferredCanvasFormat();
+      let adapter, device;
+      let isWGPUAwake = false;
+      async function awakeWebGPU() {
+        if (!gpu) {
+          throw new Error("WebGPU not available here!!");
+        }
+        try {
+          adapter = await gpu.requestAdapter();
+        } catch (error) {
+          console.log("No available GPU adapter found!!", error);
+        }
+        device = await adapter.requestDevice();
+        if (!device) {
+          throw new Error("No available device/workstation!!");
+        }
+        console.log("WebGPU Conscious!!");
+        brush.configure({
+          device: device,
+          format: format
+        });
+        console.log("WebGPU Awakened");
+        isWGPUAwake = true;
+        return;
+      }
+      window.addEventListener('load', awakeWebGPU);
+      
+      // ++ Viewport Setup ++ \\
+      const dpr = window.devicePixelRatio;
+      const dvh = window.innerHeight;
+      const dvw = window.innerWidth;
+      const dh = dvh / 100;
+      const dw = dvw / 100;
+      
+      function setupAndSizeCanvas() {
+        // << setup internal resolution >> \\
+        gpucanvas.width = dvw * dpr;
+        gpucanvas.height = dvh * dpr;
+        // << update css >> \\
+        gpucanvas.style.width = `${dvw}px`;
+        gpucanvas.style.height = `${dvh}px`;
+        console.log(`canvas height: ${gpucanvas.style.height}, \n canvas width: ${gpucanvas.style.width}, \n canvas resolution: ${gpucanvas.width} × ${gpucanvas.height}`);
+      }
+      
+      window.addEventListener('load', setupAndSizeCanvas);
+      window.addEventListener('resize', setupAndSizeCanvas);
+      
+      // ++ GPU Vertex Data ++ \\
+      const vertexData = new Float32Array([
+          1.0, 1.0,
+          -1.0, 1.0,
+          1.0, -1.0,
+          -1.0, -1.0
+        ]);
+      function manifestVertexBuffer(dataArray) {
+        // << Create Buffer from Array >> \\
+        const vertexBuffer = device.createBuffer({
+          size: dataArray.byteLength,
+          usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+          mappedAtCreation: true
+        });
+        // << Pass to GPU VRAM >> \\
+        new Float32Array(vertexBuffer.getMappedRange()).set(dataArray);
+        // << Close >> \\
+        vertexBuffer.unmap();
+        return vertexBuffer;
+      }
+      
+      // ++ WGSL ++ \\
+      const shaderCode =
+        `
+        struct VertexInput {
+          @location(0) position: vec2f // shaderLocation: 0 goes here
+        };
+        @vertex
+        fn vexterMain(input: VertexInput) -> @builtin(position) vec4f {
+          return vec4f(input.position, 0.0, 1.0);
+        }
+        @fragment 
+        fn fragmentMain() -> @location(0) vec4f {
+          return vec4f(0.3, 0.3, 0.75, 1.0);
+        };
+      `;
+      function manifestShaderModule(shaderCode) {         return device.createShaderModule({ code : shaderCode });
+      }
+        
+      // ++ GPU Pipeline ++ \\
+      function manifestPipeline(shaderModule) {
+        const pipeline = device.createRenderPipeline({
+          layout: 'auto',
+          vertex: {
+            module: shaderModule,
+            entryPoint: "vexterMain",
+            buffers: [{
+              arrayStride: 8, // how many bytes per vertex
+              attributes: [{ // whats inside each vertex
+                shaderLocation: 0, // which shader input gets this
+                offset: 0, // where in the vertex does this dara start
+                format: 'float32x2' // what type should it take
+              }]
+            }]
+          },
+          fragment: {
+            module: shaderModule,
+            entryPoint: "fragmentMain",
+            targets: [{
+              format: format
+            }]
+          },
+          primitive: {
+            topology: 'triangle-strip'
+          }
+        });
+        return pipeline;
+      }
+        
+      // ++ Rendering ++ \\
+      function manifestRendering(vertexBuffer, pipeline) {
+        const view = brush.getCurrentTexture().createView();
+        const encoder = device.createCommandEncoder();
+        const pass = encoder.beginRenderPass({
+          colorAttachments: [{
+            view: view,
+            clearValue: { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
+            loadOp: 'clear',
+            storeOp: 'store'
+          }]
+        });
+        pass.setPipeline(pipeline);
+        pass.setVertexBuffer(0, vertexBuffer); // takes 2 values: slot & buffer; gpu needs to know which slot to use and what data to assign into it;
+        pass.draw(4);
+        pass.end();
+        device.queue.submit([ encoder.finish() ]);
+      }
+        
+      // ++ Draw ++ \\
+      async function draw() {
+        const vertexBuffer = manifestVertexBuffer(vertexData);
+        console.log("Vertex Buffer created");
+        const shaderModule = manifestShaderModule(shaderCode);
+        console.log("WGSL compiled!");
+        const pipeline = manifestPipeline(shaderModule);
+        console.log("Pipeline ready");
+        manifestRendering(vertexBuffer, pipeline);
+        console.log("++DRAWN++");
+      }
+      document.addEventListener('click', draw);
+    </script>
+  </body>
+</html>
