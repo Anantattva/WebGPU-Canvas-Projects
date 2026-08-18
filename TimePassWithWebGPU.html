@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>
+      Time Pass with WebGPU
+    </title>
+    <style>
+      body {
+        margin: 0;
+      }
+      #world {
+        position: absolute;
+        margin: 0;
+        width: 100dvw;
+        height: 100dvh;
+        background: rgb(0, 0, 0);
+      }
+    </style>
+  </head>
+  <!-- Start: 17th August, 2026 -->
+  <!-- This projects was made cuz i didnt knew what to code but wanted to code something anyway. -->
+  <!-- Finish: 19th August, 2026 -->
+  <!-- This code draws a stupid magenta triangle instead of a cool cube -->
+  <!-- Will work on this again with a fresh new file. -->
+  <!-- || Har Har Mahadev || -->
+  <body>
+    <canvas id="world">
+      
+    </canvas>
+    <script>
+      // ।। ॐ नमः शिवाय ।। \\
+
+      // !! GLOBALS !! \\
+      const dpr = window.devicePixelRatio;
+      /* viewport dimensions */
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      /* unit dimensions */
+      const uw = vw / 100;
+      const uh = vh / 100;
+      /* standard unit */
+      const u = (uw + uh)/2;
+
+      // !! SETUP !! \\
+      /** @type {HTMLCanvasElement} */
+      const world = document.getElementById("world");
+      world.width = vw;
+      world.height = vh;
+
+      /**
+       * Holds WebGPU data.
+       *
+       * @type {object} wgpu
+       *
+       * @property {GPUAdapter} adapter
+       * @property {GPUDevice} device
+       * @property {GPUCanvasContext} brush
+       * @property {GPUTextureFormat} format
+       * @property {string} shader
+       * @property {GPUShaderModule} module
+       * @property {Object.<string, GPUBuffer>} buffers
+       * @property {Object.<string, GPUBindGroup>} bindGroups
+       * @property {GPURenderPipeline} pipeline
+       * @property {GPUCommandEncoder} encoder
+       * @property {GPUTextureView} textureView
+       * @property {GPURenderPassEncoder} pass
+       */
+      const wgpu = {
+        adapter: null,
+        device: null,
+        brush: null,
+        format: null,
+        shader: null,
+        module: null,
+        buffers: {},
+        bindGroups: {},
+        pipeline: null,
+        encoder: null,
+        textureView: null,
+        pass: null
+      };
+
+      /**
+       * Sets up WebGPU context, device & adapter.
+       *
+       * @async
+       * @function INITIALIZE
+       */
+      async function INITIALIZE() {
+        // << setup >> \\
+        if (!navigator.gpu) {
+          throw new Error("GPU unavailable.");
+        }
+        try {
+          wgpu.adapter = await navigator.gpu.requestAdapter();
+          wgpu.device = await wgpu.adapter.requestDevice();
+        } catch (error) {
+          console.error("Adapter or device unavailable.",  error);
+        }
+        // << configuration >> \\
+        wgpu.format = navigator.gpu.getPreferredCanvasFormat();
+        wgpu.brush = world.getContext("webgpu");
+        wgpu.brush.configure({
+          format: wgpu.format,
+          device: wgpu.device
+        });
+        console.log("WebGPU initialization successful! 😇");
+      }
+
+      /**
+       * Holds WGSL shader code.
+       *
+       * @type {string}
+       */
+      wgpu.shader = `
+      /**
+       * Aspect ratio helpful for uniform dimension scaling.
+       * @blueprint {width}/{height}
+       */
+      const ASPECT: f32 = ${vw / vh};
+
+      // +++++ VERTICES DATA +++++
+
+      // ++ first 4 top vertices ++
+      const v0: vec3f = vec3f(-0.5, 0.5, -0.5); // v0
+      const v1: vec3f = vec3f(0.5, 0.5, -0.5); // v1
+      const v2: vec3f = vec3f(-0.5, 0.5, 0.5); // v2
+      const v3: vec3f = vec3f(0.5, 0.5, 0.5); // v3
+        
+      // ++ last 4 bottom vertices ++
+      const v4: vec3f = vec3f(-0.5, -0.5, -0.5); // v4
+      const v5: vec3f = vec3f(0.5, -0.5, -0.5); // v5
+      const v6: vec3f = vec3f(-0.5, -0.5, 0.5); // v6
+      const v7: vec3f = vec3f(0.5, -0.5, 0.5); // v7
+
+      // ++ MASTER CUBE ARRAY ++
+      const CUBE: array<vec3f, 36> = array<vec3f, 36>(
+        // ++ top face ++
+        v0, v1, v2, v0, v2, v3,
+        // ++ bottom face ++
+        v4, v5, v6, v4, v6, v7,
+        
+        // ++ front face ++
+        v2, v3, v6, v2, v6, v7,
+        // ++ back face ++
+        v0, v1, v4, v0, v4, v5,
+
+        // ++ left face ++
+        v0, v2, v4, v0, v4, v6,
+        // ++ right face ++
+        v1, v3, v5, v1, v5, v7
+      );
+      
+      @vertex
+      fn vertex_entry_point(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+        var v: vec3f = CUBE[i];
+        v.y *= ASPECT;
+        return vec4f(v, 1.0);
+      }
+
+      @group(0) @binding(0) var<uniform> input_colour: vec4f;
+      
+      @fragment
+      fn fragment_entry_point() -> @location(0) vec4f {
+        return input_colour;
+      }
+      `;
+
+      /**
+       * Compiles shader code & logs out errors.
+       *
+       * @async
+       * @function compileShader
+       */
+      async function compileShader() {
+        if (!wgpu.shader) {
+          console.error("No shader code found.");
+        }
+        wgpu.module = wgpu.device.createShaderModule({ code: wgpu.shader });
+        /**
+         * Needs await because WebGPU error stacks are asynchronous.
+         * Also, the function getCompilationInfo() belongs to {GPUShaderModule}.
+         *
+         * @learning 
+         * In previous attempt, I called getCompilationInfo on {GPUDevice}.
+         * Needs to be careful here.
+         * A good lesson indeed. 🤓🤓
+         *
+         * @type {object} info
+         */
+        const info = await wgpu.module.getCompilationInfo();
+        if (info) {
+          // console.log(typeof info);
+          info.messages.forEach((m) => console.log(m));
+        }
+        console.log("WGSL shader code compilation successful! 😇");
+      }
+
+      /**
+       * Configures & sets up render pipeline.
+       *
+       * @function setupPipeline
+       */
+      function setupPipeline() {
+        wgpu.device.pushErrorScope('validation');
+        wgpu.pipeline = wgpu.device.createRenderPipeline({
+          layout: 'auto',
+          vertex: {
+            module: wgpu.module,
+            entryPoint: "vertex_entry_point"
+          },
+          fragment: {
+            module: wgpu.module,
+            entryPoint: "fragment_entry_point",
+            targets: [{ format: wgpu.format }]
+          },
+          primitive: {
+            topology: "triangle-list",
+            // ++ OPTIONAL: Hides back faces
+            cullMode: "back"
+          }
+        });
+        wgpu.device.popErrorScope().then((error) => {
+          if (error) {
+            console.log("WebGPU crash at pipeline setup.", error);
+          }
+        });
+        console.log("Render pipeline setup successful! 😇");
+      }
+
+      /**
+       * Draws a cube, taking an input colour as input.
+       * Passes data to WebGPU as uniform buffers via ArrayBuffers.
+       * Expects 4 floats as inputs.
+       *
+       * @function drawCube
+       * @param {number} r
+       * @param {number} g
+       * @param {number} b
+       * @param {number} a
+       */
+      function drawCube(r, g, b, a) {
+        // << buffer setup >> \\
+        /** @type {ArrayBuffer} */
+        const colourData = new Float32Array([r, g, b, a]);
+        const dataSize = colourData.byteLength;
+        wgpu.buffers.colour = wgpu.device.createBuffer({
+          size: dataSize,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+          // mappedAtCreation: true
+        });
+        wgpu.device.queue.writeBuffer(wgpu.buffers.colour, 0, colourData);
+
+        // << bind group >> \\
+        wgpu.bindGroups.colourBindGroup = wgpu.device.createBindGroup({
+          layout: wgpu.pipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: wgpu.buffers.colour }}
+          ]
+        });
+
+        // << encoder >> \\
+        wgpu.encoder = wgpu.device.createCommandEncoder();
+
+        wgpu.device.pushErrorScope('validation');
+        // << pass >> \\
+        /**
+         * @learning
+         * In, previous attempt, I called getCurrentTexture() on {GPUDevice}.
+         * Instead, the function belongs to {GPUCanvasContext} or brush.
+         * Good mistake! Good lesson! 👌👌
+         */
+        wgpu.textureView = wgpu.brush.getCurrentTexture().createView();
+        /**
+         * @learning
+         * In, previous attempt, I called beginRenderPass() on {GPUDevice}.
+         * Instead, the function belongs to {GPUCommandEncoder}.
+         * Good mistake! Good lesson! 👌👌
+         */
+        wgpu.pass = wgpu.encoder.beginRenderPass({
+          colorAttachments: [{
+            view: wgpu.textureView,
+            clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+            loadOp: 'clear',
+            storeOp: 'store'
+          }]
+        });
+
+        // << draw call >> \\
+        wgpu.pass.setPipeline(wgpu.pipeline);
+        wgpu.pass.setBindGroup(0, wgpu.bindGroups.colourBindGroup);
+        wgpu.pass.draw(36, 1, 0, 0);
+        wgpu.pass.end();
+
+        // << submit >> \\
+        wgpu.device.queue.submit([wgpu.encoder.finish()]);
+        wgpu.device.popErrorScope().then((error) => {
+          if (error) {
+            console.error("Crash reason: ", error);
+          }
+        });
+        console.log("Cube drawn successfully! 😇");
+      }
+       
+
+      window.addEventListener('load', async () => {
+        // << ONE TIME SETUP FUNCTIONS >> \\
+        await INITIALIZE();
+        await compileShader();
+        setupPipeline();
+        wgpu.device.addEventListener('uncapturederror', (e) => {
+          console.error("Uncaptured WebGPU error: ", e.error.message);
+        });
+        // << draw function >> \\
+        drawCube(1.0, 0.0, 1.0, 1.0);
+      });
+    </script>
+  </body>
+</html>
