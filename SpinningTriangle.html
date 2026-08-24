@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>
+      Spinning Triangle: V1
+    </title>
+    <style>
+      body {
+        margin: 0
+      }
+      #space {
+        position: absolute;
+        margin: 0;
+        width: 100dvw;
+        height: 100dvh;
+      }
+    </style>
+  </head>
+  <!-- @date -->
+  <!-- START: 24th August, 2026 -->
+  <!-- END: 24th August, 2026 -->
+  <body>
+    <canvas id="space"></canvas>
+    <script>
+      // ।। ॐ नमः शिवाय ।। \\
+
+      // !! GLOBALS !! \\
+      const dpr = window.devicePixelRatio;
+      /** viewport width */
+      const vw = window.innerWidth;
+      /** viewport height */
+      const vh = window.innerHeight;
+
+      // !! SETUP !! \\
+      /** @type {HTMLCanvasElement} */
+      const space = document.getElementById("space");
+      space.width = vw * dpr;
+      space.height = vh * dpr;
+      /** @type {GPUCanvasContext} */
+      const brush = space.getContext('webgpu');
+
+
+      ///// ===================== \\\\\
+      /// ++ WebGPU ++ \\\
+
+      /// ++ SOURCE OF TRUTH ++ \\\
+      /**
+       * Holds WebGPU data.
+       * Useful for caching, object pooling, convenient mental model & performance.
+       *
+       * @type {object}
+       * @property {GPUAdapter} adapter
+       * @property {GPUDevice} device
+       * @property {GPUTextureFormat} format
+       * @property {string} shader
+       * @property {GPUShaderModule} module
+       * @property {object<GPUBuffer>} buffers
+       * @property {GPUBindGroup} bindGroup
+       * @property {GPURenderPipeline} pipeline
+       * @property {GPUCommandEncoder} encoder
+       * @property {GPUTextureView} view
+       * @property {GPURenderPassEncoder} pass
+       */
+      const wgpu = {
+        adapter: null,
+        device: null,
+        format: null,
+        shader: null,
+        module: null,
+        buffers: {},
+        bindGroup: null,
+        pipeline: null,
+        view: null,
+        encoder: null,
+        pass: null
+      };
+
+      ///// ==================== \\\\\
+      /// ++ INITIALIZATION ++ \\\
+
+      /**
+       * Initializes WebGPU by requesting an adapter & device.
+       *
+       * @async
+       * @function INITIALIZE
+       */
+      async function INITIALIZE() {
+        if (!navigator.gpu) {
+          throw new Error("WebGPU not available");
+        }
+        try {
+          wgpu.adapter = await navigator.gpu.requestAdapter();
+        } catch (error) {
+          throw new Error("No suitable adapter found.", error);
+        }
+        try {
+          wgpu.device = await wgpu.adapter.requestDevice();
+        } catch (error) {
+          throw new Error("No suitable device found.", error);
+        }
+        wgpu.format = navigator.gpu.getPreferredCanvasFormat();
+        brush.configure({
+          device: wgpu.device,
+          format: wgpu.format
+        });
+        console.info("Initialization successful! 😇", wgpu.adapter, wgpu.device, wgpu.format, brush);
+      }
+
+      ///// ==================== \\\\\
+      /// ++ WGSL & COMPILATION ++ \\\
+
+      wgpu.shader = `
+      // << aspect constant: width / height >>
+      const ASPECT: f32 = ${(vw / vh).toFixed(4)};
+      @group(0) @binding(0) var<uniform> vertices: array<vec4f, 3>;
+      @group(0) @binding(1) var<uniform> colour: vec4f;
+
+      @vertex
+      fn vertex_main(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+        var v = vertices[i];
+        v *= 0.8; // scale down by 20%
+        v.y *= ASPECT; // scale down y-coordinate to maintain consistency
+        return vec4f(v.x, v.y, v.z, 1.5); // ENSURE: w != 0.0 ALWAYS, or you will see blank screen with no error logs & get lost debugging forever. ( w == 1.0 is often the best & safest value. ) I did this mistake myself 😭😭.
+      }
+
+      @fragment
+      fn fragment_main() -> @location(0) vec4f {
+        return colour;
+      }
+      `;
+
+      /**
+       * Compiles WGSL shader code & logs out errors (if any).
+       *
+       * @async
+       * @function compileShader
+       */
+      async function compileShader() {
+        if (!wgpu.shader) {
+          throw new Error("No WGSL shader code found.");
+        }
+        wgpu.module = wgpu.device.createShaderModule({ code: wgpu.shader });
+        const info = await wgpu.module.getCompilationInfo();
+        info.messages.forEach((m) => {
+          if (m.type === 'error') {
+            console.warn(m);
+          }
+        });
+        if (info.messages.every((m) => m.type !== 'error')) {
+          console.info("WGSL compilation successful! 😇");
+        }      
+      }      
+
+      ///// ======================= \\\\\
+      /// ++ PIPELINE ++ \\\
+
+      /**
+       * Sets up render pipeline.
+       *
+       * @function configurePipeline
+       */
+      async function configurePipeline() {
+        wgpu.device.pushErrorScope('validation');
+        wgpu.pipeline = await wgpu.device.createRenderPipelineAsync({
+          layout: 'auto',
+          vertex: {
+            module: wgpu.module,
+            entryPoint: "vertex_main"
+          },
+          fragment: {
+            module: wgpu.module,
+            entryPoint: "fragment_main",
+            targets: [{ format: wgpu.format }]
+          },
+          primitive: {
+            topology: 'triangle-list'
+          }
+        });
+        wgpu.device.popErrorScope().then((error) => {
+          if (error) {
+            console.warn("WebGPU crash at pipeline setup.", error);
+          } else {
+            console.info("Pipeline configuration successful! 😇");
+          }
+        });
+      }
+      
+      ///// ======================= \\\\\
+      /// ++ ACTUAL DRAWING ++ \\\
+
+      // ++++ base helper data ++++ \\
+      const rt3 = Math.sqrt(3);
+      const baseTriangle = new Float32Array([
+        0.0,        1.0,   // top vertex   // on unit circle y-axis
+        rt3 * 0.5,  -0.5,  // right vertex // on unit circle 4th quadrant
+        -rt3 * 0.5, -0.5   // left vertex  // on unit circle 3rd quadrant
+      ]);
+      const startColour = new Float32Array([ 0.5, 0.85, 0.1, 0.9 ]);
+      const endColour = new Float32Array([ 0.65, 0.1, 1.0, 0.7 ]);
+      
+      /**
+       * Draws a triangle by passing coordinates & colours via ArrayBuffer.
+       * Input values take rotated angle offset in radians.
+       * And the degree of interpolation blend between the 2 colours.
+       * The triangle starts with 0 radian rotation offset & "startColour".
+       * After one rotation cycle, the triangle is has spinned one complete 360° circle & back to "startColour".
+       * In between, the triangle's colours smoothly interpolates to "endColour" & smoothly comes back "startColour".
+       * This pattern keeps repeating.
+       *
+       * @function drawTriangle
+       * @param {number} rotate - rotated angle in radians
+       * @param {number} blend - colour interpolation degree, clamped between 0 to 1
+       */
+      let timeRecords = []; // We store the time taken to render each triangle here and log it oer second. Preventing from logging every frame & polluting console.
+      function drawTriangle(rotate, blend) {
+        // << 2D rotation formula: (x, y) rotated by angle a ==> (x * cos(a) - y * sin(a), x * sin(a) + y * cos(a)) >> \\
+        // << colour interpolation formula: (c1, c2) at degree b ==> (c1 * (1 - b), c2 * b) >> \\
+        /**
+         * @learning
+         * @pathflow
+         * 
+         * First, we calculate new positions & colour.
+         * Then setup buffers data to be passed as uniform buffers.
+         *
+         * Next, we setup buffers via GPUDevice.createBuffer method.
+         * Each buffer takes 2 arguments: size in bytes & usage flags (GPUBufferUsage.flags).
+         * Buffers may take a third argument 'mappedAtCreation: {bool}' as well.
+         * But since, we are manually passing buffers to GPUQueue, we don't need it (infact, { mappedAtCreation: true } with writeBuffer causes heavy errors).
+         * We pass each buffer to GPUQueue via GPUQueue.writeBuffer method.
+         * This method takes 3 arguments: GPUBuffer, offset (often always 0), corresponding ArrayBuffer.
+         *
+         * Next, we setup bind groups to bind our buffers data so that our render pipeline could use it.
+         * We use method GPUDevice.createBindGroup().
+         * It takes an object as argument called {BindGroupDescriptor}.
+         * The BindGroupDescriptor object takes 2 arguments as input:
+         *   - layout: descriping bind group (also called {GPUBindGroupLayout}) and
+         *   — entries: an array of objects
+         *     — with each object describing one binding in 2 inputs:
+         *       — binding: {corresponsing @binding(k) in WGSL} and
+         *       — resource: declaring the buffers used.
+         *
+         * Next step is super-easy & friendly.
+         * It's just getting an encoder {GPUCommandEncoder} via GPUDevice.createCommandEncoder() method call.
+         * And then getting the current texture view {GPUTextureView} via GPUCanvasContext.getCurrentTexture().createView() method call.
+         * 
+         * We finally come to final steps.
+         * It's setting up a pass {GPURenderPassEncoder} via GPUCommandEncoder.beginRenderPass() method.
+         * It takes an object called {RenderPassDescriptor} as input.
+         * The object consists of only one argument 'colorAttachments' - which is an array of objects.
+         * The object within this takes 4 arguments:
+         *   — view: {GPUTextureView},
+         *   — clearValue: { r, g, b, a }, - the colour values that clear screen operation takes. **MUST USE FLOATS** like 1.0, integers like 1 will throw silent errors & you will be lost wondering where did I go wrong.
+         *   — loadOP: {string}, - takes 2 string values: 'clear' OR 'load'. You would often use 'clear'.
+         *   — storeOP: {string} - takes 2 string values: 'store' OR 'discard'. The latter is rarely used.
+         *
+         * Now that our {GPURenderPassEncoder} or simply pass is ready, we can pass draw commands.
+         * Set pipeline to pass via: GPURenderPassEncoder.setPipeline(GPURenderPipeline).
+         * Set bind groups (if any) via: GPURenderPassEncoder.setBindGroup(offset, GPUBindGroup). Offset is mostly always 0.
+         * Set draw vertices (for this case, only 3) via: GPURenderPassEncoder.draw(number_of_vertices).
+         * End: GPURenderPassEncoder.end(). NOTE: this consumes & destroys pass altogether. It can no more be used. So, we create new ones on each draw call.
+         *
+         * FINALLY: SUBMIT.
+         * GPUQueue.submit([ GPUCommandEncoder.finish() ]).
+         * GPUQueue is belongs to GPUDevice and is accessed via GPUDevice.queue.
+         * NOTE: just like pass, this consumes & destroys encoder altogether. Likewise, it can no more be used and requires us to create new ones on each draw call.
+         */
+
+        /** @type {DOMHighResTimeStamp} */
+        const start = performance.now();
+        
+        // << data setup >> \\
+        const cos = Math.cos(rotate);
+        const sin = Math.sin(rotate);
+        const newVertices = new Float32Array([
+          baseTriangle[0] * cos - baseTriangle[1] * sin, baseTriangle[0] * sin + baseTriangle[1] * cos, 0.0, 1.0,
+          baseTriangle[2] * cos - baseTriangle[3] * sin, baseTriangle[2] * sin + baseTriangle[3] * cos, 0.0, 1.0,
+          baseTriangle[4] * cos - baseTriangle[5] * sin, baseTriangle[4] * sin + baseTriangle[5] * cos, 0.0, 1.0
+        ]);
+        const newColour = new Float32Array([
+          startColour[0] * (1 - blend), endColour[0] * blend,
+          startColour[1] * (1 - blend), endColour[1] * blend,
+          startColour[2] * (1 - blend), endColour[2] * blend,
+          startColour[3] * (1 - blend), endColour[3] * blend
+        ]);
+        // console.info("Data setup done! 😇", newVertices, newColour);
+        
+        // << buffers >> \\
+        wgpu.buffers.vertices = wgpu.device.createBuffer({
+          size: newVertices.byteLength,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+        wgpu.device.queue.writeBuffer(wgpu.buffers.vertices, 0, newVertices);
+        wgpu.buffers.colour = wgpu.device.createBuffer({
+          size: newColour.byteLength,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+        wgpu.device.queue.writeBuffer(wgpu.buffers.colour, 0, newColour);
+        // console.info("Buffers setup done! 😇", wgpu.buffers);
+
+        // << bind groups >> \\
+        wgpu.bindGroup = wgpu.device.createBindGroup({
+          layout: wgpu.pipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: wgpu.buffers.vertices } },
+            { binding: 1, resource: { buffer: wgpu.buffers.colour } }
+          ]
+        });
+        // console.info("Bind groups setup done! 😇", wgpu.bindGroup);
+
+        // << encoder & view >> \\
+        wgpu.encoder = wgpu.device.createCommandEncoder();
+        wgpu.view = brush.getCurrentTexture().createView();
+        // console.info("Encoder & view ready!", wgpu.encoder, wgpu.view);
+        
+        // << render pass >> \\
+        wgpu.pass = wgpu.encoder.beginRenderPass({
+          colorAttachments: [{
+            view: wgpu.view,
+            clearValue: { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
+            loadOp: 'clear',
+            storeOp: 'store'
+          }]
+        });
+        // console.info("Render pass setup done! 😇", wgpu.pass);
+        wgpu.pass.pushDebugGroup('validation');
+        wgpu.pass.setPipeline(wgpu.pipeline);
+        wgpu.pass.setBindGroup(0, wgpu.bindGroup);
+        wgpu.pass.draw(3);
+        wgpu.pass.popDebugGroup(); /** @learning popDebugGroup takes no arguments */
+        wgpu.pass.end();
+        // console.info("Draw command passed! 😇");
+
+        // << draw call >> \\
+        /** @type {GPUQueue} wgpu.device.queue */
+        wgpu.device.queue.submit([ wgpu.encoder.finish() ]);
+        // console.info("DRAWN SUCCESSFULLY!! 😇");
+
+        // << clean / prevent memory leaks >> \\
+        wgpu.buffers.vertices.destroy();
+        wgpu.buffers.colour.destroy();
+        // << Remember kids: cleanliness is next to godliness. >> \\
+
+        /** @type {DOMHighResTimeStamp} */
+        const end = performance.now();
+        // console.log(`Time to draw one frame: ${(end - start).toFixed(4)}ms`);
+        timeRecords.push((end - start).toFixed(4));
+      }
+
+      ///// ======================= \\\\\
+      /// ++ LISTENER SETUP ++ \\\
+      window.addEventListener('load', async () => {
+        /** @type {DOMHighResTimeStamp} */
+        const start = performance.now();
+
+        ///// << ONE-TIME FUNCTIONS >> \\\\\
+        await INITIALIZE();
+        await compileShader();
+        await configurePipeline();
+
+        wgpu.device.addEventListener('uncapturederror', (e) => {
+          /** type{GPUValidationError} e.error */
+          console.warn("Uncaptured WebGU error: ", e.error);
+        });
+
+        /** @type {DOMHighResTimeStamp} */
+        const end = performance.now();
+        console.log(`Time for initialization setup: ${(end - start).toFixed(4)}ms.`);
+
+        ///// << WORKING FUNCTIONS >> \\\\\
+        /**
+         * Binding function.
+         * Recursively calls back requestAnimationFrame to render frames.
+         *
+         * @function drawFrame
+         * @param {DOMHighResTimeStamp} currentTime
+         */
+        const baseTime = performance.now();
+        function drawFrame(currentTime) {
+          const elapsed = currentTime - baseTime;
+          const cycle = (0.001 * elapsed) / (Math.PI * 2); // sector / one full rotation; then divided by 1000 to make interpolation slow & smooth
+          const blend = (Math.sin(cycle * Math.PI * 2) + 1) / 2; // oscillates between 0 to 1
+          drawTriangle(-elapsed / 1000, blend);
+          requestAnimationFrame(drawFrame);
+        }
+        requestAnimationFrame(drawFrame);
+
+        /**
+         * Performance tracking.
+         * This functions uses recursive requestAnimationFrame calls to update frames' count.
+         * Then logs out frame rates in fps/hertz.
+         * Also logs out timeRecords global array to show per-triangle render time.
+         * Then clears & resets all counters.
+         * 
+         * @function logFPS
+         * @param {DOMHighResTimeStamp} currentTime
+         */
+        let lastTime = performance.now();
+        let frameCount = 0;
+        function logFPS(currentTime) {
+          frameCount++;
+          const elapsed = currentTime - lastTime;
+          if (elapsed >= 1000) {
+            console.log(`Frame rate: ${frameCount}fps.`);
+            console.log(timeRecords);
+            frameCount = 0;
+            timeRecords = [];
+            lastTime = currentTime - (elapsed % 1000);
+          }
+          requestAnimationFrame(logFPS)
+        }
+        requestAnimationFrame(logFPS);
+      });
+
+      ///// ======================== \\\\\
+      /// ++ PROGRAMMER'S NOTES ++ \\\
+      ///// ======================== \\\\\
+      
+      /**
+       * ┌─────────────────────────────────────────────-─-───────┐
+       * │           << WebGPU LIFECYCLE CHEAT SHEET >>          │
+       * ├──────────────────────────────────────────────-─────-──┤
+       * │ < Create Once (Reuse) > │ < Create Every Frame >      │
+       * ├───────────────────────────────────────────────-────-──┤
+       * │ • Shader Module         │ • Buffers (if data changes) │
+       * │ • Pipeline              │ • Encoder (consumed)        │
+       * │ • BindGroupLayout       │ • RenderPass (consumed)     │
+       * │                         │ • BindGroup (if changes)    │
+       * └─────────────────────────────-───────────────────────-─┘
+       */
+      
+      /**
+       * @global_identifiers
+       *   — dpr, const
+       *   — vw, const
+       *   — vh, const
+       *   — space, const
+       *   — brush, const
+       *   — wgpu, const
+       *   — timeRecords, let
+       * @global_function_calls none
+       *
+       * @window_event
+       * @local_identifiers
+       *   — start, const
+       *   — end, const
+       *   — baseTime, const
+       *   — lastTime, let
+       * @local_function_calls
+       *   — INITIALIZE, once
+       *   — compileShader, once
+       *   — configurePipeline, once
+       *   — drawFrame, infinite rAF recursion
+       *   — logFPS, infinite rAF recursion
+       * 
+       * @functions_list
+       *   — INITIALIZE
+       *   — compileShader
+       *   — configurePipeline
+       *   — drawTriangle
+       *   — drawFrame
+       *   — logFPS
+       * 
+       * All functions are called inside window.onload event.
+       * The first 3 are one-time setup functions only.
+       * We reuse the cached shader module & pipeline over & over.
+       * 
+       * The drawTriangle function is the real thing that draws our Spinning Triangle.
+       * However, it's a solitary function without any loop.
+       * The drawFrame calls it recursively within an rAF loop by passing updated values each frame.
+       * The values passed in hardware-agnostic, meaning one loop looks identical be it a 60hz monitor or 165hz.
+       * 
+       * The last 2 functions are declared within the window.onload event listener function itself and kickstarted via rAF.
+       */
+    </script>
+  </body>
+</html>
