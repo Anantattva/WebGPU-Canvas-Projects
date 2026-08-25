@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>
+      Tetrahedron : V1.0
+    </title>
+    <style>
+      body {
+        margin: 0;
+      }
+      #space {
+        position: absolute;
+        margin: 0;
+        width: 100dvw;
+        height: 100dvh;
+      }
+    </style>
+  </head>
+  <!-- ।। ॐ नमः शिवाय ।। -->
+  <!-- @date START: 25th August, 2026 -->
+  <!-- @date END: 25th August, 2026 -->
+  <body>
+    <canvas id="space"></canvas>
+    <script>
+      // ।। ॐ नमः शिवाय ।। \\
+      /*
+          __              __
+         |  |   |\ |     |__
+         |__|m  | \|amah  __|hivaya     
+      */
+
+      ///// ================ \\\\\
+      /// ++ GLOBALS ++ \\\
+      ///// ================ \\\\\
+      const dpr = window.devicePixelRatio;
+      /** viewport width / 100dvw */
+      const vw = window.innerWidth;
+      /** viewport height / 100dvh */
+      const vh = window.innerHeight;
+      
+      ///// ================= \\\\\
+      /// ++ SETUP ++ \\\
+      ///// ================= \\\\\
+      /** @type {HTMLCanvasElement} */
+      const space = document.getElementById("space");
+      space.width = vw * dpr;
+      space.height = vh * dpr;
+      /** @type {GPUCanvasContext} */
+      const brush = space.getContext('webgpu');
+
+      ///// ================= \\\\\
+      /// ++ SOURCE OF TRUTH ++ \\\
+      ///// ================= \\\\\
+      /**
+       * Holds WebGPU data.
+       * Acts as a centralized hub of communication & storage.
+       * Useful for clean mental mapping, object pooling & performance optimization.
+       * << Remember kids: “Clarity is the counterweight to fear. Name the thing, and you tame the thing.” >>
+       * 
+       * @type {object}
+       * @property {GPUAdapter} adapter
+       * @property {GPUDevice} device
+       * @property {GPUTextureFormat} format
+       * @property {string} shader
+       * @property {GPUShaderModule} module
+       * @property {object<GPUBuffer>} buffers
+       * @property {GPUBindGroup} bindGroup
+       * @property {GPURenderPipeline} pipeline
+       * @property {GPUTexture} texture
+       * @property {GPUCommandEncoder} encoder
+       * @property {GPUTextureView} view
+       * @property {GPURenderPassEncoder} pass
+       */
+      const wgpu = {
+        adapter: null,
+        device: null,
+        format: null,
+        shader: null,
+        module: null,
+        pipeline: null,
+        texture: null,
+        buffers: {},
+        bindGroup: null,
+        encoder: null,
+        view: null,
+        pass: null
+      };
+
+      ///// ==================== \\\\\
+      /// ++ INITIALIZATION ++ \\\
+      ///// ==================== \\\\\
+
+      /**
+       * Initializes WebGPU by requesting an adapter & device.
+       *
+       * @async
+       * @function INITIALIZE
+       */
+      async function INITIALIZE() {
+        if (!navigator.gpu) {
+          throw new Error("WebGPU not available");
+        }
+        try {
+          wgpu.adapter = await navigator.gpu.requestAdapter();
+        } catch (error) {
+          throw new Error("No suitable adapter found.", error);
+        }
+        try {
+          wgpu.device = await wgpu.adapter.requestDevice();
+        } catch (error) {
+          throw new Error("No suitable device found.", error);
+        }
+        wgpu.format = navigator.gpu.getPreferredCanvasFormat();
+        brush.configure({
+          device: wgpu.device,
+          format: wgpu.format
+        });
+        console.info("Initialization successful! 😇", wgpu.adapter, wgpu.device, wgpu.format, brush);
+      }
+
+      ///// ===================== \\\\\
+      /// ++ WGSL & COMPILATION ++ \\\
+      ///// ===================== \\\\\
+
+      wgpu.shader = `
+      const ASPECT: f32 = ${vw / vh};
+      @group(0) @binding(0) var<uniform> base_vertices: array<vec4f, 12>;
+      @group(0) @binding(1) var<uniform> rotation: vec4f; // ( angle rotated on x-axis, angle rotated on y-axis, 0.0, 0.0 )
+      @group(0) @binding(2) var<uniform> colour: vec4f;
+
+      // ++ helper function ++
+      // ++ creates perspective projection matrix ++
+      /*
+        Takes 4 values as f32.
+          - fov: field of view
+          - aspect: width / height
+          - near: z point closest from camera/observer
+          - far: z point fartest from camera/observer
+      */
+      fn create_projection_matrix(fov: f32, aspect: f32, near: f32, far: f32) -> mat4x4f {
+        let f: f32 = 1.0 / tan(fov / 2.0);
+        return mat4x4f(
+          f / aspect, 0.0, 0.0,                         0.0,
+          0.0,        f,   0.0,                         0.0,
+          0.0,        0.0, far / (near - far),          -1.0,
+          0.0,        0.0, (near * far) / (near - far), 0.0
+        );
+      }
+
+      @vertex
+      fn vs_main(@builtin(vertex_index) i : u32) -> @builtin(position) vec4f {
+        // << setup >>
+        var v: vec4f = base_vertices[i];
+        
+        let cosx: f32 = cos(rotation.x);
+        let sinx: f32 = sin(rotation.x);
+        
+        let cosy: f32 = cos(rotation.y);
+        let siny: f32 = sin(rotation.y);
+
+        v *= 0.8; // scale down to 80%;
+        v.w = 1.0;
+        
+        /*
+          ++++ 2D ROTATION FORMULA ++++
+          A point with coordinates (x, y) on any 2D plane when rotated by angle a transforms to:
+            << ( x * cos(a) - y * sin(a), x * sin(a) + y* cos(a) ) >>
+          Holds true across all 3 planes: xy, yz & zx.
+          
+          FOR TRIG PROOF:
+            • consider a point P(x, y) with polar coordinates (r * cos(a), r * sin(a)).
+            • Now, if our new rotated point is P'(x', y') which is point P rotated by angle k.
+            • Then, the polar coordinates of our new point is (r * cos(a + k), r * sin(a + k)).
+            • Expand the expressions using trig identities to get:
+                - P' = (r * cos(a + k), r * sin(a + k))
+                     = (r * (cos(a) * cos(k) - sin(a) * sin(k)), r * (sin(a) * cos(k) + sin(k) * cos(a)))
+                     = (r * cos(a) * cos(k) - r * sin(a) * sin(k), r * sin(a) * cos(k) + r * sin(k) * cos(a))
+                - Now, notice the pair (r * cos(a), r * sin(a)) is just our original point P(x, y).
+                - Hence,
+                  P' = (x * cos(k) - y * sin(k), x * sin(k) + y * cos(k))
+                       QED
+                  Also, notice how our presumptive values radius r & angle a get completely eliminated from the final result.
+        */
+        // << apply x-axis rotation >>
+        /*
+          A point rotated by an angle on x-axis, corresponds to yz plane.
+          Thus, only the (y, z) coordinates change and x remains static.
+          Implying, we only need (y, z) in the formula.
+        */
+        let y1: f32 = v.y * cosx - v.z * sinx;
+        let z1: f32 = v.y * sinx + v.z * cosx;
+        v.y = y1;
+        v.z = z1;
+        
+
+        // << apply y-axis rotation >>
+        /*
+          A point rotated by an angle on y-axis, corresponds to zx plane.
+          Thuse only the (z, x) coordinates change andyx remains static.
+          Implying, we only need (z, x) in the formula.
+        */
+        let z2: f32 = v.z * cosy - v.x * siny;
+        let x2: f32 = v.z * siny + v.x * cosy;
+        v.z = z2;
+        v.x = x2;
+
+        v.z -= 5.0;
+
+        let proj: mat4x4f = create_projection_matrix(3.14159 / 3.0, ASPECT, 0.1, 100.0);
+
+        return proj * v;
+      }
+
+      @fragment
+      fn fs_main() -> @location(0) vec4f {
+        return colour;
+      }
+      `;
+
+      /**
+       * Compiles WGSL shader code & logs out errors (if any).
+       *
+       * @async
+       * @function compileShader
+       */
+      async function compileShader() {
+        if (!wgpu.shader) {
+          throw new Error("No WGSL shader code found.");
+        }
+        wgpu.module = wgpu.device.createShaderModule({ code: wgpu.shader });
+        const info = await wgpu.module.getCompilationInfo();
+        info.messages.forEach((m) => {
+          if (m.type === 'error') {
+            console.warn(m);
+          }
+        });
+        if (info.messages.every((m) => m.type !== 'error')) {
+          console.info("WGSL compilation successful! 😇");
+        }      
+      }      
+
+      ///// ======================= \\\\\
+      /// ++ RENDER PIPELINE ++ \\\
+      ///// ======================= \\\\\
+      
+      /**
+       * Sets up the render pipeline & also depth texture.
+       * We use GPUDevice.createRenderPipelineAsync() method instead of GPUDevice.createRenderPipeline().
+       * Both methods are functionally identical.
+       * However, createRenderPipeline() executes synchronously & returns an {object}.
+       * While, createRenderPipelineAsync() executes asynchronously & returns a {Promise<object>}.
+       * The async method is often preferred though both run identically after initialization.
+       * It's mostly a design & safety choics to use the async method.
+       *
+       * @async
+       * @function configurePipeline
+       */
+      async function configurePipelineAndTexture() {
+        // << configure pipeline >> \\
+        wgpu.device.pushErrorScope('validation');
+        wgpu.pipeline = await wgpu.device.createRenderPipelineAsync({
+          layout: 'auto',
+          vertex: {
+            module: wgpu.module,
+            entryPoint: "vs_main"
+          },
+          fragment: {
+            module: wgpu.module,
+            entryPoint: "fs_main",
+            targets: [{ format: wgpu.format }]
+          },
+          primitive: {
+            topology: 'triangle-list',
+            // cullMode: 'back'
+          },
+          depthStencil: {
+            depthWriteEnabled: true,
+            depthCompare: 'less',
+            format: 'depth24plus',
+          }
+        });
+        wgpu.device.popErrorScope().then((error) => {
+          if (error) {
+            console.warn("WebGPU crash at pipeline setup.", error);
+          } else {
+            console.info("Pipeline configuration successful! 😇");
+          }
+        });
+
+        // << configure depth texture >> \\
+        wgpu.texture = wgpu.device.createTexture({
+          size: [space.width, space.height],
+          format: 'depth24plus',
+          usage: GPUTextureUsage.RENDER_ATTACHMENT
+        });
+      }
+
+      ///// ======================== \\\\\
+      /// ++ ACTUAL DRAWING ++ \\\
+      ///// ======================== \\\\\
+
+      /// +++ base helper data +++ \\\
+      const rt3 = Math.sqrt(3);
+      /*
+      const v0 = new Float32Array([0.0,        1.0,  0.5,                      1.0]);
+      const v1 = new Float32Array([0.0,        -0.5, (-0.5 * rt3 + 1.0) / 2.0, 1.0]); // z is clamped between [0.0, 1.0] since that's what WebGPU demands;
+      const v2 = new Float32Array([0.5 * rt3,  -0.5, (0.5 * rt3 + 1.0) / 2.0,  1.0]);
+      const v3 = new Float32Array([-0.5 * rt3, -0.5, (0.5 * rt3 + 1.0) / 2.0,  1.0]);
+      */
+      const v0 = new Float32Array([1.0,  1.0,  1.0,  1.0]);
+      const v1 = new Float32Array([1.0,  -1.0, -1.0, 1.0]);
+      const v2 = new Float32Array([-1.0, 1.0,  -1.0, 1.0]);
+      const v3 = new Float32Array([-1.0, -1.0, 1.0,  1.0]);
+      
+      const baseVertices = new Float32Array([
+        // << x, y, z, w >> \\
+        ...v0, ...v1, ...v2,
+        ...v1, ...v2, ...v3,
+        ...v2, ...v3, ...v0,
+        ...v3, ...v0, ...v1
+      ]);
+      const baseColour = new Float32Array([0.65, 0.0, 1.0, 1.0]);
+      // ++ stores time stamps ++ \\
+      // ++ helps record & profile performance ++ \\
+      let timeRecords = [];
+      
+      /**
+       * Draws the tetrahedron taking rotation angles (x, y) as input.
+       *
+       * @function drawTetrahedron
+       * @param {number} rx
+       * @param {number} ry
+       */
+      function drawTetrahedron(rx, ry) {
+        /**
+         * @learning
+         * @pathflow
+         *
+         * Our first step is to setup buffers & bind groups.
+         * Buffers is basically the input data we pass via JS.
+         * Bind group is what binds this data to GPU memory.
+         * The method GPUDevice.createBuffer() helps us declare buffers.         
+         * We then write it to GPUQueue via GPUDevice.queue.write(GPUBuffer, offset, ArrayBuffer);
+         * Offset is mostly always 0. (I don't know why for now.)
+         *
+         * Then we setup GPUBindGroup via GPUDevice.createBindGroup().
+         *
+         * Next, we create encoder {GPUCommandEncoder} & view {GPUTextureView}.
+         * Encoder is simply like a recipe book where we pass the final instructions.
+         * View is needed to create our pass {GPURenderPassEncoder}.
+         *
+         * We bind pipeline & bind group to pass.
+         * Then issue draw commands & close pass.
+         *
+         * FINALLY, we submit it to GPUQueue via GPUQueue.submit([ GPUCommandEncoder.finish() ]).
+         * Also, at last we destroy all buffers used here to cleanup VRAM.
+         * The method is simply: GPUBuffer.destroy().
+         * That's sit, now memory is free 
+         * This is necessarily cuz the GPU is very dumb & needs spoonfeeding.
+         * Also this prevents memory leaks & device crashes.
+         */
+
+        /** @type {DOMHighResTimeStamp} */
+        const start = performance.now();
+        
+        // << array buffers layout >> \\
+        const vertices = new Float32Array(Array.from(baseVertices));
+        const rotation = new Float32Array([rx, ry, 0.0, 0.0]);
+        const colour = new Float32Array(Array.from(baseColour));
+        // console.log("Array buffers ready! 😇😎");
+
+        // << create buffers >> \\
+        wgpu.buffers.vertices = wgpu.device.createBuffer({
+          size: vertices.byteLength,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+        wgpu.buffers.rotation = wgpu.device.createBuffer({
+          size: rotation.byteLength,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+        wgpu.buffers.colour = wgpu.device.createBuffer({
+          size: colour.byteLength,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+        // console.log("GPU buffers ready! 😇😎");
+
+        // << write to GPUQueue >> \\
+        /**
+         * @learning
+         * The method is GPUQueue.writeBuffer();
+         * It takes 3 values: (GPUBuffer, offset, JS ArrayBuffer).
+         * Offset is mostly zero.
+         *
+         * ENSURE you don't make the mistakes of accidently writing to GPUDevice.
+         * Buffers are strictly written to GPUQueue.
+         * However, the GPUQueue itself belongs to GPUDevice and is accessed via GPUDevice.queue.
+         */
+        wgpu.device.queue.writeBuffer(wgpu.buffers.vertices, 0, vertices);
+        wgpu.device.queue.writeBuffer(wgpu.buffers.rotation, 0, rotation);
+        wgpu.device.queue.writeBuffer(wgpu.buffers.colour, 0, colour);
+        // console.log("Buffers successfully written to GPUQueue! 😇😎");
+
+        // << setup bind group >> \\
+        wgpu.bindGroup = wgpu.device.createBindGroup({
+          layout: wgpu.pipeline.getBindGroupLayout(0),
+          entries: [
+            /**
+             * @learning
+             * ENSURE you pass the actual {GPUBuffer} in buffer property.
+             * NEVER pass JS {ArrayBuffer}.
+             * That causes heavy errors.
+             * I did this mistake myself!! 😞😞😭😭
+             */
+            { binding: 0, resource: { buffer: wgpu.buffers.vertices } },
+            { binding: 1, resource: { buffer: wgpu.buffers.rotation } },
+            { binding: 2, resource: { buffer: wgpu.buffers.colour } }
+          ]
+        });
+        // console.log("Bind group successfully created! 😇😎");
+
+        // << encoder & view >> \\
+        wgpu.encoder = wgpu.device.createCommandEncoder();
+        wgpu.view = brush.getCurrentTexture().createView();
+        // console.log("Encoder & view ready! 😇😎");
+
+        // << render pass >> \\
+        wgpu.pass = wgpu.encoder.beginRenderPass({
+          /** @type {GPURenderPassColorAttachments} */
+          colorAttachments: [{
+            view: wgpu.view,
+            clearValue: { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
+            loadOp: 'clear',
+            storeOp: 'store'
+          }],
+          /** @type {GPURenderPassDepthStencilAttachment} */
+          depthStencilAttachment: {
+            view: wgpu.texture.createView(),
+            depthClearValue: 1.0,
+            depthLoadOp: 'clear',
+            depthStoreOp: 'store'
+          }
+          /**
+           * NOTE:
+           * colorAttachments is **PLURAL** and of type {array<object>}.
+           * depthStencilAttachment is **SINGULAR** and of type {object}.
+           */
+        });
+        // console.log("Render pass ready! 😇😎");
+
+        // << draw call >> \\
+        wgpu.pass.setPipeline(wgpu.pipeline);
+        wgpu.pass.setBindGroup(0, wgpu.bindGroup);
+        wgpu.pass.draw(12);
+        wgpu.pass.end(); // pass consumed & destroyed; no more usable;
+        // console.log("Draw call issued! 😇😎");
+
+        // << FINAL SUBMIT >> \\
+        wgpu.device.queue.submit([ wgpu.encoder.finish() ]); // encoder consumed & destroyed; no more usable;
+        // console.log("DRAWN SUCCESSFULLY! 😇😎");
+
+        // << manual cleanup / no memory leaks 😇😇 >> \\
+        wgpu.buffers.vertices.destroy();
+        wgpu.buffers.rotation.destroy();
+        wgpu.buffers.colour.destroy();
+
+        /** @type {DOMHighResTimeStamp} */
+        const end = performance.now();
+        timeRecords.push((end - start).toFixed(4));
+      }
+
+      ///// ======================== \\\\\
+      /// ++ MASTER EVENT LISTENER ++ \\\
+      ///// ======================== \\\\\
+      window.addEventListener('load', async () => {
+        ///// ==================== \\\\\
+        /// ++ ONE-TIME FUNCTIONS ++ \\\
+        ///// ==================== \\\\\
+        
+        /** @type {DOMHighResTimeStamp} */
+        const start = performance.now();
+        
+        await INITIALIZE();
+        await compileShader();
+        await configurePipelineAndTexture();
+
+        wgpu.device.addEventListener('uncapturederror', (e) => {
+          /** @type {GPUValidationError} e.error */
+          console.log("WebGPU crash reason: ", e.error);
+        });
+
+        /** @type {DOMHighResTimeStamp} */
+        const end = performance.now();
+        console.log(`Time for initialization: ${(end - start).toFixed(4)}ms.`);
+
+        ///// ================ \\\\\
+        /// ++ ANIMATION LOOP ++ \\\
+        ///// ================ \\\\\
+        
+        /**
+         * Renders frame via requestAnimationFrame.
+         * Hardware agnostic.
+         * Adjusts as per device refresh rate using delta time.
+         *
+         * @function renderFrame
+         * @param {DOMHighResTimeStamp} currentTime
+         */
+        /** @type {DOMHighResTimeStamp} */
+        const baseTime = performance.now();
+        function renderFrame(currentTime) {
+          const elapsed = currentTime - baseTime;
+          drawTetrahedron(elapsed / 3000, elapsed / 1000);
+          requestAnimationFrame(renderFrame);
+        }
+        requestAnimationFrame(renderFrame);
+
+        ///// ============= \\\\\
+        /// ++ PERFORMANCE ++ \\\
+        ///// ============= \\\\\
+        
+        /**
+         * Tracks & logs frame rates and GPU render cycles per second.
+         * Used requestAnimationFrame.
+         *
+         * @function logFPS
+         * @param {DOMHighResTimeStamp} currentTime
+         */
+        /** @type {DOMHighResTimeStamp} */
+        let lastTime = performance.now();
+        let frameCount = 0;
+        function logFPS(currentTime) {
+          frameCount++;
+          const elapsed = currentTime - lastTime;
+          if (elapsed > 1000.0) {
+            console.log(`Frame rate: ${frameCount}fps.`);
+            console.log("GPU time cycles: ", timeRecords);          
+            timeRecords = [];
+            frameCount = 0;
+            lastTime = currentTime - (elapsed % 1000.0);
+          }
+          requestAnimationFrame(logFPS);
+        }
+        requestAnimationFrame(logFPS);
+      });
+
+      ///// ==================================== \\\\\
+      /// ++ DEVELOPER'S NOTES ++ \\\
+      ///// ==================================== \\\\\
+      /// ++ ARCHITECTURE: DEPTH & STENCIL ++ \\\
+      ///// ==================================== \\\\\
+      /**
+       * || Om Tatpurushaya Vidmahe |
+       *    Mahadevaya Dhimahi |
+       *    Tanno Rudrah Prachodayat ||
+       */
+      /*
+          +-------------------------------------------------------------+
+          |                  THE 3D Z-BUFFER (DEPTH)                    |
+          +-------------------------------------------------------------+
+          |  Without Depth:                                             |
+          |    Triangle A (Far) drawn LAST  ---> Overwrites Triangle B  |
+          |    (Result: Glitchy, inside-out visuals)                    |
+          |                                                             |
+          |  With Depth (depth24plus):                                  |
+          |    1. GPU tests incoming Pixel Z against Depth Texture.     |
+          |    2. Is Z closer than current Depth Value?                 |
+          |       YES --> Draw Pixel + Write new Z to Depth Texture.    |
+          |       NO  --> Discard Pixel (Occluded by closer geometry).  |
+          +-------------------------------------------------------------+
+
+          ┌─────────────────────────────────────────────────────────────┐
+          │                    GPU TEXTURE ANATOMY                      │
+          └─────────────────────────────────────────────────────────────┘
+          
+          ┌───────────────────────┐           ┌───────────────────────┐
+          │   COLOR ATTACHMENT    │           │   DEPTH ATTACHMENT    │
+          ├───────────────────────┤           ├───────────────────────┤
+          │ View: Canvas Texture  │           │ View: GPU Depth Tex   │
+          │ Format: bgra8unorm    │           │ Format: depth24plus   │
+          │ Stores: RGBA Pixels   │           │ Stores: Z-Distance    │
+          └───────────┬───────────┘           └───────────┬───────────┘
+                      │                                   │
+                      └───────────────┬───────────────────┘
+                                      ▼
+                        ┌───────────────────────────┐
+                        │    GPURenderPassEncoder   │
+                        │  (Rasterizes & Z-Tests)   │
+                        └───────────────────────────┘
+      */
+
+      /**
+       * @learning DEPTH_BUFFER_ESSENTIALS
+       * @pathflow
+       * 
+       * 1. WHAT IS A DEPTH TEXTURE?
+       *    A 2D array of floating-point values stored in VRAM matching screen size.
+       *    Instead of storing colors (RGB), it stores normalized depth coordinates [0.0 to 1.0].
+       *    - 0.0 = Nearest point (Near plane)
+       *    - 1.0 = Farthest point (Far plane / Background)
+       * 
+       * 2. CREATING TEXTURES WITH `createTexture()`:
+       *    Unlike canvas textures provided automatically by brush.getCurrentTexture(),
+       *    depth buffers must be explicitly allocated in GPU VRAM.
+       * 
+       *    Key Properties:
+       *      • size: [width, height] -> MUST match your render canvas dimensions!
+       *      • format: 'depth24plus' -> 24-bit precision depth buffer (GPU optimized).
+       *      • usage: GPUTextureUsage.RENDER_ATTACHMENT -> Tells WebGPU this texture
+       *               will be written to directly by the render pass output.
+       * 
+       * 3. RENDER PASS ATTACHMENT RULES:
+       *    • colorAttachments: Array [...] -> Allows multiple targets (MRT).
+       *    • depthStencilAttachment: Object {...} -> SINGULAR object! Only 1 depth target allowed.
+       * 
+       * 4. DEPTH STENCIL PIPELINE DESCRIPTOR (`depthStencil`):
+       *    • depthWriteEnabled: true  -> Allows winning pixels to write their new Z value.
+       *    • depthCompare: 'less'     -> "Pass the pixel test ONLY if new Z < old Z".
+       *    • format: 'depth24plus'    -> Pipeline format MUST match texture format!
+       * 
+       * << "Depth testing transforms 2D canvas pixels into a true coordinate space, 
+       *     letting distance determine visibility rather than draw order." >>
+       */
+    </script>
+  </body>
+</html>
