@@ -14,4 +14,6 @@ Files worth reading are:
 - [WebGPU Colour Visualizer](ColourVisualizer_WebGPU.html)
 - [WebGPU Triangle](WebGPUBasics3.html)
 - [3D Cube in 2D Canvas](Canvas_3DCube_3.html)
-> 🪁 *I have tried writing the best documentations, comments & explanations I could to make WebGPU understandable. Even for beginners. I find most samples online are dead code with no soul & docs.*
+> 🪁 *I have tried writing the best documentations, comments & explanations I could to make WebGPU understandable — even for beginners.*
+> 
+> *😞 I find most samples online are dead code with no soul & docs. As a result, I have documented my own mistakes & pitfalls, with intuitive mental maps & thinking models to absorb WebGPU API quicker - it's presented in a way I would've have wanted for myself when I had started with this.*
