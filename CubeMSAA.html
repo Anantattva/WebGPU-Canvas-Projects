@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>
+      3D Rotating Cube with MSAA: V4.0
+    </title>
+    <style>
+      body {
+        margin: 0;
+      }
+      #space {
+        position: absolute;
+        margin: 0;
+        width: 100dvw;
+        height: 100dvh;
+      }
+    </style>
+  </head>
+  <!-- ।। ॐ नमः शिवाय ।। -->
+  <!-- @date START 27th August, 2026 -->
+  <!-- @date END 27th August, 2026 -->
+  <!-- This is same project as Cube_V3.html dated 26th August, 2026 -->
+  <!-- But it has used MSAA to render crips graphics even at low resolution -->
+  <!-- Also querySet & GPU timestamps have been introduced too -->
+  <body>
+    <canvas id="space"></canvas>
+    <script>
+      // ।। ॐ नमः शिवाय ।। \\
+
+      ///// ================ \\\\\
+      /// ++ GLOBALS ++ \\\
+      ///// ================ \\\\\
+      /** viewport width / 100dvw */
+      const vw = window.innerWidth;
+      /** viewport height / 100dvh */
+      const vh = window.innerHeight;
+      
+      ///// ================= \\\\\
+      /// ++ SETUP ++ \\\
+      ///// ================= \\\\\
+      /** @type {HTMLCanvasElement} */
+      const space = document.getElementById("space");
+      space.width = vw;
+      space.height = vh;
+      /** @type {GPUCanvasContext} */
+      const brush = space.getContext('webgpu');
+
+      ///// ================= \\\\\
+      /// ++ SOURCE OF TRUTH ++ \\\
+      ///// ================= \\\\\
+      /**
+       * Holds WebGPU data.
+       * Acts as a centralized hub of communication & storage.
+       * Useful for clean mental mapping, object pooling & performance optimization.
+       * << Remember kids: “Clarity is the counterweight to fear. Name the thing, and you tame the thing.” >>
+       * 
+       * @type {object}
+       * @property {GPUAdapter} adapter
+       * @property {GPUDevice} device
+       * @property {GPUTextureFormat} format
+       * @property {GPUQuerySet} querySet
+       * @property {string} shader
+       * @property {GPUShaderModule} module
+       * @property {object<GPUBuffer>} buffers
+       * @property {GPUBindGroup} bindGroup
+       * @property {GPURenderPipeline} pipeline
+       * @property {object<GPUTexture>} textures
+       * @property {GPUCommandEncoder} encoder
+       * @property {GPURenderPassEncoder} pass
+       */
+      const wgpu = {
+        adapter: null,
+        device: null,
+        format: null,
+        querySet: null,
+        shader: null,
+        module: null,
+        pipeline: null,
+        textures: {},
+        buffers: {},
+        bindGroup: null,
+        encoder: null,
+        pass: null
+      };
+
+      ///// ==================== \\\\\
+      /// ++ INITIALIZATION ++ \\\
+      ///// ==================== \\\\\
+
+      /**
+       * Initializes WebGPU by requesting an adapter & device.
+       * Then configures canvas context.
+       * And finally sets up gpu query set to record timestamps.
+       *
+       * @async
+       * @function INITIALIZE
+       */
+      async function INITIALIZE() {
+        if (!navigator.gpu) {
+          throw new Error("WebGPU not available");
+        }
+        try {
+          wgpu.adapter = await navigator.gpu.requestAdapter();
+        } catch (error) {
+          throw new Error("No suitable adapter found.", error);
+        }
+        try {
+          /**
+           * WebGPU provides native hardware timestamps via Query Sets.
+           * This allows one to measure exact execution times on the GPU
+           * rather than just timing when JavaScript submits the commands.
+           * Because timestamp queries can be used for timing attacks,
+           * they are treated as an optional feature and require a few specific setup steps.
+           */
+          wgpu.device = await wgpu.adapter.requestDevice({
+            requiredFeatures: ['timestamp-query'] // <-- required feature to read timestamps
+          });
+        } catch (error) {
+          throw new Error("No suitable device found.", error);
+        }
+        /**
+         * @inbuilt_function configure
+         * @belongs_to GPUCanvasContext
+         * @param {GPUCanvasConfiguration} object, needing atleast 2 properties
+         * @property {GPUDevice} device
+         * @property {GPUTextureFormat} format
+         */
+        wgpu.format = navigator.gpu.getPreferredCanvasFormat();
+        brush.configure({
+          device: wgpu.device,
+          format: wgpu.format
+        });
+        /**
+         * @learning
+         * @inbuilt_function createQuerySet
+         * @belongs_to GPUDevice
+         * @param {GPUQuerySetDescriptor} object
+         * @param {GPUQueryType} string declaring query type
+         * @param {number} count - number of query slots to allocate
+         * @return {GPUQuerySet}
+         *
+         * @learning GPU Timestamp Queries
+         * Allocates a query set container on the device to capture exact hardware 
+         * execution intervals down to the nanosecond level. Requires the 
+         * 'timestamp-query' feature flag to be explicitly enabled on device request.
+         *
+         * We also add relevent <timeStampWrites> GPURenderPassEncoder.
+         * Then create 2 new buffers: one to resolve timestamps query, the other to read it back.
+         * Finally, GPUCommandEncoder queries to fetch back data.
+         */
+        wgpu.querySet = wgpu.device.createQuerySet({
+          type: 'timestamp',
+          count: 2 // we need only 2 timestamps: START & END
+        });
+        console.info("Initialization successful! 😇", wgpu.adapter, wgpu.device, wgpu.format, brush);
+      }
+
+      ///// ===================== \\\\\
+      /// ++ WGSL & COMPILATION ++ \\\
+      ///// ===================== \\\\\
+
+      wgpu.shader = `
+      const vw: f32 = ${space.width};
+      const vh: f32 = ${space.height};
+      
+      @group(0) @binding(0) var<uniform> proj_matrix: mat4x4f;
+      @group(0) @binding(1) var<uniform> base_vertices: array<vec4f, 36>;
+      @group(0) @binding(2) var<uniform> rotated_angles: vec2f;
+
+      struct VertexOutput {
+        /**
+         * We needed @location(0) attribute to prevent compiler from error like:
+         *   "Missing entry point I/O attribute."
+         */
+        @location(0) base_position: vec4f,
+        @builtin(position) current_position: vec4f,
+      }
+
+      @vertex
+      fn vertex_shader(@builtin(vertex_index) i: u32) -> VertexOutput {
+        // << setup >>
+        var output: VertexOutput;
+        var v: vec4f = base_vertices[i];
+        
+        let cosx: f32 = cos(rotated_angles.x);
+        let sinx: f32 = sin(rotated_angles.x);
+        
+        let cosy: f32 = cos(rotated_angles.y);
+        let siny: f32 = sin(rotated_angles.y);
+
+        // << apply x rotation >>
+        let y1: f32 = v.y * cosx - v.z * sinx;
+        let z1: f32 = v.y * sinx + v.z * cosx;
+        v.y = y1;
+        v.z = z1;
+
+        // << apply y rotation >>
+        let z2: f32 = v.z * cosy - v.x * siny;
+        let x2: f32 = v.z * siny + v.x * cosy;
+        v.z = z2;
+        v.x = x2;
+
+        // << apply perspective & return >>
+        v.z -= vw * 0.02;
+        output.base_position = base_vertices[i];
+        output.current_position = proj_matrix * v;
+        return output;
+      }
+
+      @fragment
+      fn fragment_shader(vertex: VertexOutput) -> @location(0) vec4f {
+        let v: vec4f = vertex.base_position;
+        return 0.5 * (v + vec4f(1.0, 1.0, 1.0, 1.0)); 
+      }
+      `;
+
+      /**
+       * Compiles WGSL shader code & logs out errors (if any).
+       *
+       * @async
+       * @function compileShader
+       */
+      async function compileShader() {
+        if (!wgpu.shader) {
+          throw new Error("No WGSL shader code found.");
+        }
+        /**
+         * @inbuilt_function createShaderModule
+         * @belongs_to GPUDevice
+         * @param {GPUShaderModuleDescriptor} expects an object
+         * @property {string} code, contains text/wgsl
+         *
+         * @async
+         * @inbuilt_function getCompilationInfo
+         * @belongs_to GPUShaderModule
+         * @return {GPUCompilationMessage} Promise<object>
+         */
+        wgpu.module = wgpu.device.createShaderModule({ code: wgpu.shader });
+        const info = await wgpu.module.getCompilationInfo();
+        info.messages.forEach((m) => {
+          if (m.type === 'error') {
+            console.warn(m);
+          }
+        });
+        if (info.messages.every((m) => m.type !== 'error')) {
+          console.info("WGSL compilation successful! 😇");
+        }      
+      }      
+
+      ///// ======================= \\\\\
+      /// ++ RENDER PIPELINE ++ \\\
+      ///// ======================= \\\\\
+      
+      /**
+       * Sets up the render pipeline & also depth texture.
+       * We use GPUDevice.createRenderPipelineAsync() method instead of GPUDevice.createRenderPipeline().
+       * Both methods are functionally identical.
+       * However, createRenderPipeline() executes synchronously & returns an {object}.
+       * While, createRenderPipelineAsync() executes asynchronously & returns a {Promise<object>}.
+       * The async method is often preferred though both run identically after initialization.
+       * It's mostly a design & safety choics to use the async method.
+       *
+       * @async
+       * @function configurePipelineAndTextures
+       */
+      async function configurePipelineAndTextures() {
+        // << configure pipeline >> \\
+        /**
+         * @inbuilt_function pushErrorScope
+         * @belongs_to GPUDevice
+         * @param {GPUErrorFilter}
+         */
+        wgpu.device.pushErrorScope('validation');
+        /**
+         * @async
+         * @inbuilt_function createRenderPipelineAsync
+         * @belongs_to GPUDevice
+         * @param {GPURenderPipelineDescriptor} expects an object describing pipeline layout
+         * @property {GPUAutoLayoutMode} layout
+         * @property {GPUVertexState} vertex, expects an object
+         * @property {GPUFragmentState} fragment, expects an object
+         * @property {GPUMultisampleState} multisample, expects an object
+         * @property {GPUPrimitiveState} primitive, expects an object
+         * @property {GPUDepthStencilState} depthStencil, expects an object
+         * @return {GPURenderPipeline} Promise<object>
+         */
+        wgpu.pipeline = await wgpu.device.createRenderPipelineAsync({
+          layout: 'auto',
+          vertex: {
+            module: wgpu.module,
+            entryPoint: "vertex_shader"
+          },
+          fragment: {
+            module: wgpu.module,
+            entryPoint: "fragment_shader",
+            targets: [{ format: wgpu.format }]
+          },
+          multisample: {
+            count: 4
+          },
+          primitive: {
+            topology: 'triangle-list',
+            // cullMode: 'back'
+          },
+          depthStencil: {
+            depthWriteEnabled: true,
+            depthCompare: 'less',
+            format: 'depth24plus',
+          }
+        });
+        /**
+         * @async
+         * @inbuilt_function popErrorScope
+         * @belongs_to GPUDevice
+         * @return {Promise<object>}
+         */
+        wgpu.device.popErrorScope().then((error) => {
+          if (error) {
+            console.warn("WebGPU crash at pipeline setup.", error);
+          } else {
+            console.info("Pipeline configuration successful! 😇");
+          }
+        });
+
+        // << configure depth texture >> \\
+        /**
+         * @inbuilt_function createTexture
+         * @belongs_to GPUDevice
+         * @param {GPUTextureDescriptor} expects an object
+         * @property {array<number, 2>} size, width × height
+         * @property {GPUTextureFormat} format
+         * @property {flags} usage, GPUTextureUsage flags
+         * @return {GPUTexture}
+         *
+         * 
+         * @learning Multisampled Color Target (MSAA)
+         * Creates an offscreen texture with sampleCount: 4.
+         * The fragment shader runs across sub-pixel samples to eliminate jaggies
+         * without straining the GPU via full canvas DPR upscaling.
+         *
+         *        
+         * @learning Depth Texture (Z-Buffer)
+         * Must match the exact sample count (4) and dimensions of the color target.
+         * Tracks pixel depth so closer triangles correctly overwrite background ones.
+         * 
+         * +++++ WHAT IS SAMPLE COUNT? +++++
+         * Sample count refers to the number of sub-pixel samples evaluated for every single pixel during rendering
+         * —essentially how many times the GPU checks where geometric edges cross a pixel grid.
+         * 
+         * Sample Count = 1 (Standard): The fragment shader runs once per pixel.
+         * If a triangle edge cuts halfway through a pixel,
+         * that pixel is either fully colored or left blank,
+         * creating harsh, stair-stepped jagged lines ("jaggies").
+         * 
+         * Sample Count = 4 (4x MSAA):
+         * The GPU divides each pixel into a sub-grid of 4 sub-samples.
+         * While the interior of a triangle evaluates shading once,
+         * any pixel containing a triangle edge calculates coverage across all 4 sub-samples and blends them together.
+         * This smooths out edges cleanly without forcing the expensive fragment shader to run 4 times across the entire screen.
+         *
+         * **(Note: Beyond 4 samples, like going to 8x,
+         *          you hit heavy diminishing visual returns
+         *          while burning extra GPU memory.)**
+         * 
+         * +++++ WHY NEED 2 TEXTURES AT ALL??? +++++
+         * We needed two separate textures because a color attachment and a depth attachment serve completely different purposes,
+         * require incompatible data formats, and cannot share the same physical memory space when MSAA is involved.
+         * 
+         * Here is why they cannot be merged into a single texture:
+         * 1. Incompatible Formats
+         *      - The Color Texture needs a renderable color format (like RGBA8Unorm)
+         *        to store red, green, blue, and alpha values for every pixel.
+         *      - The Depth Texture needs a specialized depth-stencil format (like depth24plus)
+         *        to store floating-point Z-values for depth testing.
+         *      - **KEY INSIGHT:** A single texture cannot be both a color container and a depth buffer simultaneously.
+         * 2. The MSAA Resolve Conflict
+         *      - When using Multi-Sample Anti-Aliasing (MSAA), our multisampled color texture (sampleCount: 4)
+         *        acts as a temporary workspace that gets squashed down (resolved) into your single-sample onscreen canvas via the resolveTarget.
+         *      - Depth buffers cannot be resolved into color canvases because depth data (Z-indices) and color data (RGB)
+         *        are entirely different types of information.
+         *      - Therefore, the color workflow requires its own multisampled texture with a resolve path,
+         *        while the depth buffer requires its own dedicated standalone texture to track pixel occlusion during the render pass.
+         */
+        wgpu.textures.depth = wgpu.device.createTexture({
+          size: [space.width, space.height],
+          sampleCount: 4,
+          format: 'depth24plus',
+          usage: GPUTextureUsage.RENDER_ATTACHMENT
+        });
+        wgpu.textures.msaa = wgpu.device.createTexture({
+          size: [space.width, space.height],
+          sampleCount: 4,
+          format: wgpu.format,
+          usage: GPUTextureUsage.RENDER_ATTACHMENT
+        });
+        console.log("Texture ready! 😎😇", wgpu.textures);
+      }
+
+      ///// ==================== \\\\\
+      /// ++ Static Buffers ++ \\\
+      ///// ==================== \\\\\
+
+      /**
+       * Creates a Perspective Projection Matrix.
+       * Also known as Model View Projection Matrix.
+       * 
+       * @function createProjectionMatrix
+       * @param {number} fov, field of view
+       * @param {number} aspect, width/height ratio
+       * @param {number} near, point nearest to camera/observer
+       * @param {number} far, point closest to camera/observer
+       * @return {ArrayBuffer} Float32Array of form mat4x4f
+       */
+      function createProjectionMatrix(fov, aspect, near, far) {
+        const f = 1.0 / Math.tan(fov / 2.0);
+        return new Float32Array([
+          f / aspect, 0.0, 0.0,                          0.0,
+          0.0,        f,   0.0,                          0.0,
+          0.0,        0.0, far / (near - far),          -1.0,
+          0.0,        0.0, (near * far) / (near - far),  0.0
+        ]);
+      }
+      /**
+       * Creates the ArrayBuffer for cubes.
+       * Passes 36 vertices for rendering.
+       * Each square face composes of 2 triangles -> so, 6 vertices per face.
+       * Thus, 6 × 6 = 36 vertices per cube.
+       * Each vertex: <x, y, z, w>.
+       * Thus, 36 × 4 = 144 total array length.
+       * So, 144 × 4 = 576 bytes array size.
+       *
+       * @function create3DCube
+       * @return {ArrayBuffer} Float32Array
+       */
+      /*
+      function create3DCube() {
+        const v0 = new Float32Array([ 1.0,   1.0,  1.0, 1.0]);
+        const v1 = new Float32Array([-1.0,   1.0,  1.0, 1.0]);
+        const v2 = new Float32Array([ 1.0,  -1.0,  1.0, 1.0]);
+        const v3 = new Float32Array([ 1.0,   1.0, -1.0, 1.0]);
+        const v4 = new Float32Array([-1.0,  -1.0,  1.0, 1.0]);
+        const v5 = new Float32Array([-1.0,   1.0, -1.0, 1.0]);
+        const v6 = new Float32Array([ 1.0,  -1.0, -1.0, 1.0]);
+        const v7 = new Float32Array([-1.0,  -1.0, -1.0, 1.0]);
+        
+        return new Float32Array([
+          ...v0, ...v1, ...v2,
+          ...v0, ...v2, ...v3,
+          
+          ...v1, ...v2, ...v3,
+          ...v1, ...v3, ...v4,
+          
+          ...v2, ...v3, ...v4,
+          ...v2, ...v4, ...v5,
+          
+          ...v3, ...v4, ...v5,
+          ...v3, ...v5, ...v6,
+          
+          ...v4, ...v5, ...v6,
+          ...v4, ...v6, ...v7,
+          
+          ...v5, ...v6, ...v7,
+          ...v5, ...v7, ...v0,
+        ]);
+      }
+      */
+      function create3DCube() {
+        // Define 8 unique corners
+        const v0 = [ 1.0,  1.0,  1.0, 1.0]; // Front-top-right
+        const v1 = [-1.0,  1.0,  1.0, 1.0]; // Front-top-left
+        const v2 = [-1.0, -1.0,  1.0, 1.0]; // Front-bottom-left
+        const v3 = [ 1.0, -1.0,  1.0, 1.0]; // Front-bottom-right
+        const v4 = [ 1.0,  1.0, -1.0, 1.0]; // Back-top-right
+        const v5 = [-1.0,  1.0, -1.0, 1.0]; // Back-top-left
+        const v6 = [-1.0, -1.0, -1.0, 1.0]; // Back-bottom-left
+        const v7 = [ 1.0, -1.0, -1.0, 1.0]; // Back-bottom-right
+        
+        return new Float32Array([
+          // Front face (+Z)
+          ...v0, ...v1, ...v2,   ...v0, ...v2, ...v3,
+          // Back face (-Z)
+          ...v4, ...v7, ...v6,   ...v4, ...v6, ...v5,
+          // Top face (+Y)
+          ...v4, ...v5, ...v1,   ...v4, ...v1, ...v0,
+          // Bottom face (-Y)
+          ...v3, ...v2, ...v6,   ...v3, ...v6, ...v7,
+          // Right face (+X)
+          ...v4, ...v0, ...v3,   ...v4, ...v3, ...v7,
+          // Left face (-X)
+          ...v1, ...v5, ...v6,   ...v1, ...v6, ...v2,
+        ]);
+      }
+
+      
+      /**
+       * This function sets up static buffers that don't change.
+       * Includes **Perspective Projection Matrix**.
+       *
+       * @function setupBuffersAndBindGroup
+       */
+      function setupBuffersAndBindGroup() {
+        const projMatrix = createProjectionMatrix(Math.PI / 3.0, vw / vh, 1.0, 100.0);
+        const baseVertices = create3DCube();
+        
+        /**
+         * @inbuilt_function createBuffer
+         * @belongs_to GPUDevice
+         * @param {GPUBufferDescriptor} expects an object
+         * @property {number} size, size in bytes
+         * @property {flags} usage, expects a bitwise combo of GPUBufferUsage flags
+         */
+        wgpu.buffers.projMatrix = wgpu.device.createBuffer({
+          size: projMatrix.byteLength,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+        wgpu.buffers.baseVertices = wgpu.device.createBuffer({
+          size: baseVertices.byteLength,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+        wgpu.buffers.rotatedAngles = wgpu.device.createBuffer({
+          size: 8, // 2 × f32
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+        // << these 2 buffers help us store & read back timestamp query from render pass >> \\
+        wgpu.buffers.resolve = wgpu.device.createBuffer({
+          size: 16,
+          usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC
+        });
+        wgpu.buffers.readBack = wgpu.device.createBuffer({
+          size: 16,
+          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+        });
+        
+        /**
+         * @inbuilt_function writeBuffer
+         * @belongs_to GPUQueue
+         * @param {GPUBuffer} target gpu buffer to write to
+         * @param {number} offset, mostly always 0
+         * @param {ArrayBuffer} the actual JS Array
+         * @param {number} [dataOffset] - optional offset in element units
+         * @param {number} [size] - optional element count to copy
+         */
+        wgpu.device.queue.writeBuffer(wgpu.buffers.projMatrix, 0, projMatrix);
+        wgpu.device.queue.writeBuffer(wgpu.buffers.baseVertices, 0, baseVertices);
+
+        // << bind group >> \\
+        /**
+         * @inbuilt_function createBindGroup
+         * @belongs_to GPUDevice
+         * @param {GPUBindGroupDescriptor} expects an object
+         * @property {GPUBindGroupLayout} layout
+         * @property {GPUBindGroupEntry[]} entries, expects an array of objects
+         * @return {GPUBindGroup} object
+         * 
+         * @inbuilt_function getBindGroupLayout
+         * @belongs_to GPURenderPipeline
+         * @param {number} index of bind group
+         * @return {GPUBindGroupLayout} object
+         */                      
+        wgpu.bindGroup = wgpu.device.createBindGroup({
+          layout: wgpu.pipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: wgpu.buffers.projMatrix } },
+            { binding: 1, resource: { buffer: wgpu.buffers.baseVertices } },
+            { binding: 2, resource: { buffer: wgpu.buffers.rotatedAngles } }
+          ]
+        });      
+        console.log("Buffers & bind group ready!! 😎😇🥳");
+      }
+
+      ///// ======================== \\\\\
+      /// ++ ACTUAL DRAWING ++ \\\
+      ///// ======================== \\\\\
+
+      /**
+       * Draws a cube per frame.
+       * Takes 2 input number: the angles rotated on x & y axis.
+       * 
+       * @async
+       * @function drawCube
+       * @param {number} rx, rotated angle x
+       * @param {number} ry, rotated angle y
+       */
+      let timeRecords = []; // stores time cycles per render frame;
+      async function drawCube(rx, ry) {
+        /** @type {DOMHighResTimeStamp} */
+        const start = performance.now();
+        // << setup array buffer >> \\
+        const rotatedAngles = new Float32Array([rx, ry]);        
+
+        // << write to VRAM >> \\
+        /**
+         * @learning
+         * GPUBindGroup needs to be creates only once.
+         * It only allocates specific slot of empty space in GPU memory.
+         * GPUQueue.writeBuffer allows us to write or re-write to this memory slot over-&-over without needing to re-create bind group on every call.
+         *
+         * @optimization
+         * Helps boost performance by preventing re-allocation overhead.
+         */
+        wgpu.device.queue.writeBuffer(wgpu.buffers.rotatedAngles, 0, rotatedAngles);
+        // console.log("Buffers allocated to VRAM!! 😎😇🥳");
+
+        // << encoder & render pass >> \\
+        /**
+         * @inbuilt_function createProjectionMatrix
+         * @belongs_to GPUDevice
+         * @return {GPUCommandEncoder} object
+         *
+         * @inbuilt_function beginRenderPass
+         * @belongs_to GPUCommandEncoder
+         * @param {GPURenderPassDescriptor} object
+         * @property {GPURenderPassColorAttachments} colorAttachments, expects an {array<object>}
+         * @property {GPURenderPassDepthStencil} depthStencilAttachment, object
+         * @return {GPURenderPassEncoder} object
+         * 
+         * @inbuilt_function getCurrentTexture
+         * belongs_to GPUCanvasContext
+         * @return {GPUTexture} object
+         *
+         * @inbuilt_function createView
+         * @belongs_to GPUTexture
+         * @return {GPUTextureView} object
+         */
+        wgpu.encoder = wgpu.device.createCommandEncoder();
+        wgpu.pass = wgpu.encoder.beginRenderPass({
+          colorAttachments: [{
+            view: wgpu.textures.msaa.createView(),                 // Multi-Sample Anti-Aliasing Texture
+            resolveTarget: brush.getCurrentTexture().createView(), // Downscales cleanly to canvas
+            clearValue: { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
+            loadOp: 'clear',
+            storeOp: 'discard'
+          }],
+          depthStencilAttachment: {
+            view: wgpu.textures.depth.createView(),
+            depthClearValue: 1.0,
+            depthLoadOp: 'clear',
+            depthStoreOp: 'store'
+          },
+          // << record START & END points of the pass >> \\
+          timeStampWrites: {
+            querySet: wgpu.querySet,
+            beginningOfPassWriteIndex: 0,
+            endOfPassWriteIndex: 1
+          }
+        });
+        // console.log("Encoder & render pass ready!! 😎😇🥳");
+
+        // << draw call >> \\
+        /**
+         * @inbuilt_function setPipeline
+         * @belongs_to GPURenderPassEncoder
+         * @param {GPURenderPipeline}
+         *
+         * @inbuilt_function setBindGroup
+         * @belongs_to GPURenderPassEncoder
+         * @param {number} offset, often 0
+         * @param {GPUBindGroup}
+         *
+         * @inbuilt_function draw
+         * @belongs_to GPURenderPassEncoder
+         * @param {GPUSize32} vertexCount - required, the number of vertices to draw
+         * @param {GPUSize32} [instanceCount=1] - the number of instances to draw, defaults to 1
+         * @param {GPUSize32} [firstVertex=0] - offset into the vertex buffer / start index, defaults to 0
+         * @param {GPUSize32} [firstInstance=0] - offset for instanced rendering ID, defaults to 0
+         */
+        wgpu.pass.setPipeline(wgpu.pipeline);
+        wgpu.pass.setBindGroup(0, wgpu.bindGroup);
+        wgpu.pass.draw(36);
+        wgpu.pass.end();
+        // console.log("Draw call issued!! 😎😇🥳");
+
+        // << submit >> \\
+        /**
+         * @inbuilt_function resolveQuerySet
+         * @belongs_to GPUCommandEncoder
+         * @param {GPUQuerySet} querySet - source query container to read from
+         * @param {number} firstQuery - index of the first query to resolve
+         * @param {number} queryCount - total number of queries to copy over
+         * @param {GPUBuffer} destination - staging buffer with GPUBufferUsage.QUERY_RESOLVE
+         * @param {number} destinationOffset - byte offset into destination buffer
+         * 
+         * @learning Query Resolution Phase
+         * Unloads raw GPU timestamp counters from the hardware query set into a 
+         * resolve-capable buffer so they can safely transfer over to CPU-readable memory.
+         * 
+         * 
+         * @inbuilt_function copyBufferToBuffer
+         * @belongs_to GPUCommandEncoder
+         * @param {GPUBuffer} source - buffer containing resolved query metrics
+         * @param {number} sourceOffset - offset bytes from source start
+         * @param {GPUBuffer} destination - readback buffer with GPUBufferUsage.MAP_READ
+         * @param {number} destinationOffset - offset bytes into destination start
+         * @param {number} size - total number of bytes to copy (16 bytes for 2 BigUint64s)
+         * 
+         * 
+         * @inbuilt_function submit
+         * @belongs_to GPUQueue
+         * @param {Iterable<GPUCommandBuffer>} [commandBuffers] - array of submitted command buffers
+         *
+         * @inbuilt_function finish
+         * @belongs_to GPUCommandEncoder
+         * @param {GPUCommandBufferDescriptor} [descriptor] - optional label descriptor
+         * @param {GPUCommandBuffer} opaque command buffer ready for queue submission
+         */
+        
+        wgpu.encoder.resolveQuerySet(wgpu.querySet, 0, 2, wgpu.buffers.resolve, 0);
+        wgpu.encoder.copyBufferToBuffer(wgpu.buffers.resolve, 0, wgpu.buffers.readBack, 0, 16);
+        wgpu.device.queue.submit([ wgpu.encoder.finish() ]);
+        // console.log("Draw call submitted!! 😎😇🥳");
+
+        // << read back the data asynchronously >> \\
+        /**
+         * @async
+         * @inbuilt_function mapAsync
+         * @belongs_to GPUBuffer
+         * @param {GPUMapMode} mode - flags determining mapping access (e.g., GPUMapMode.READ)
+         * @param {number} [offset=0] - byte offset into the buffer to start mapping
+         * @param {number} [size] - total bytes to map
+         * @return {Promise<void>} resolves when the buffer is safely mapped to CPU memory
+         * 
+         * @learning Buffer Asynchronous Mapping
+         * WebGPU buffers live securely in VRAM. mapAsync forces a synchronization point 
+         * so the CPU can safely read data written or copied by the GPU
+         * (such as timestamp query results).
+         * 
+         * 
+         * @inbuilt_function getMappedRange
+         * @belongs_to GPUBuffer
+         * @param {number} [offset=0] - byte offset where the accessible view begins, defaults to zero
+         * @param {number} [size] - optional byte length of the mapped range
+         * @return {ArrayBuffer} a direct raw memory view of the buffer's contents
+         * 
+         * @learning CPU Memory Access
+         * Returns an ArrayBuffer view that JavaScript can wrap in a TypedArray 
+         * (like BigUint64Array) to parse raw binary data sent from the GPU.
+         * 
+         * 
+         * @inbuilt_function unmap
+         * @belongs_to GPUBuffer
+         * 
+         * @learning Releasing CPU Control
+         * Unmaps the buffer, relinquishing CPU access so the GPU can safely reuse 
+         * or write to the memory block again in future frames.
+         * **KEY INSIGHT:** Failing to unmap after reading will break subsequent write & copy operations on that buffer.
+         */
+        await wgpu.buffers.readBack.mapAsync(GPUMapMode.READ);
+        const times = new BigUint64Array(wgpu.buffers.readBack.getMappedRange());
+        wgpu.buffers.readBack.unmap(); // SUPER IMPORTANT
+
+        // << timestamps are given in nanoseconds >> \\
+        const time = times[1] - times[0];
+        console.log(`GPU execution time: ${time / 1000000}ms.`);
+        /**
+         * 😞😞 A SAD THING: 
+         * Browsers heavily restrict or explicitly return 0 for GPU timestamps
+         * unless cross-origin isolation headers are enabled,
+         * or the adapter explicitly returns real timestamps without being blocked by anti-profiling policies.
+         *
+         * Check Browser Flags (Chrome/Edge):
+         * If you find times[1] and times[0] are still reading as 0n or undefined,
+         * it's because modern browsers zero-out hardware timestamps to prevent timing attacks
+         * unless you run your local server with specific headers:
+         *   Cross-Origin-Opener-Policy: same-origin
+         *   Cross-Origin-Embedder-Policy: require-corp
+         *
+         *
+         * If you are just looking to track performance for debugging your frame rates
+         * without wrestling with browser security policies,
+         * relying on JavaScript's high-resolution performance.now() delta around your
+         * submission blocks is usually cleaner and fully supported out-of-the-box.
+         */
+
+        /** @type {DOMHighResTimeStamp} */
+        const end = performance.now();
+        timeRecords.push((end - start).toFixed(4));
+      }
+
+      
+      ///// ======================== \\\\\
+      /// ++ MASTER EVENT LISTENER ++ \\\
+      ///// ======================== \\\\\
+      window.addEventListener('load', async () => {
+        ///// ==================== \\\\\
+        /// ++ ONE-TIME FUNCTIONS ++ \\\
+        ///// ==================== \\\\\
+        
+        /** @type {DOMHighResTimeStamp} */
+        const start = performance.now();
+        
+        await INITIALIZE();
+        await compileShader();
+        await configurePipelineAndTextures();
+        setupBuffersAndBindGroup();
+
+        wgpu.device.addEventListener('uncapturederror', (e) => {
+          /** @type {GPUValidationError} e.error */
+          console.log("WebGPU crash reason: ", e.error);
+        });
+
+        /** @type {DOMHighResTimeStamp} */
+        const end = performance.now();
+        console.log(`Time for initialization: ${end - start}ms.`);
+
+        ///// ================ \\\\\
+        /// ++ ANIMATION LOOP ++ \\\
+        ///// ================ \\\\\
+        
+        /**
+         * Renders frame via requestAnimationFrame.
+         * Hardware agnostic.
+         * Adjusts as per device refresh rate using delta time.
+         *
+         * @function renderFrame
+         * @param {DOMHighResTimeStamp} currentTime
+         */
+        /** @type {DOMHighResTimeStamp} */
+        const baseTime = performance.now();
+        function renderFrame(currentTime) {
+          const elapsed = currentTime - baseTime;
+          drawCube(elapsed / 3000.0, elapsed / 1000.0);
+          requestAnimationFrame(renderFrame);
+        }
+        requestAnimationFrame(renderFrame);
+
+        ///// ============= \\\\\
+        /// ++ PERFORMANCE ++ \\\
+        ///// ============= \\\\\
+        
+        /**
+         * Tracks & logs frame rates and GPU render cycles per second.
+         * Used requestAnimationFrame.
+         *
+         * @function logFPS
+         * @param {DOMHighResTimeStamp} currentTime
+         */
+        /** @type {DOMHighResTimeStamp} */
+        let lastTime = performance.now();
+        let frameCount = 0;
+        function logFPS(currentTime) {
+          frameCount++;
+          const elapsed = currentTime - lastTime;
+          if (elapsed > 1000.0) {
+            console.log(`Frame rate: ${frameCount}fps.`);
+            console.log("GPU time cycles: ", timeRecords);          
+            timeRecords = [];
+            frameCount = 0;
+            lastTime = currentTime - (elapsed % 1000.0);
+          }
+          requestAnimationFrame(logFPS);
+        }
+        requestAnimationFrame(logFPS);
+      });
+
+      /**
+       * @functions_list
+       *    INITIALIZE
+       *    compileShader
+       *    configurePipelineAndTextures
+       *    setupBuffersAndBindGroup
+       *    createProjectionMatrix
+       *    create3DCube
+       *    drawCube
+       *    renderFrame
+       *    logFPS
+       *
+       * The first 4 functions are used only once during initialization setup.
+       * The functions createProjectionMatrix & create3DCube are called within setupBuffersAndBindGroup only once.
+       * The function renderFrame & logFPS are declared window.addEventListener() function.
+       * The actual draw function drawCube is called recursively within renderFrame via rAF.
+       */
+      
+			/*
+			  =============================================================================
+				             +++++++ PROGRAMMER'S NOTES +++++++
+				=============================================================================
+
+				"Clarity is the counterweight to fear. Name the thing, and you tame the thing."
+				"CPU allocates space; GPU handles pace. Don't re-point what you can re-write."
+				"Buffers are buckets, bind groups are maps, and pipelines are factories."
+
+				-----------------------------------------------------------------------------
+				[ TAGS ]
+			  #WebGPU #3DGraphics #ZeroAllocation #PipelineArchitecture #Shaders #MatrixMath
+				-----------------------------------------------------------------------------
+
+				+---------------------------------------------------------------------------+
+				|                             MENTAL MODELS                                 |
+				+---------------------------------------------------------------------------+
+
+				1. THE CENTRAL HUB (`wgpu` Source of Truth)
+						 Think of `wgpu` as the single mission control center. Instead of letting
+				 		 handles scatter across global scope, `wgpu` retains state, memory buffers,
+						 and pipeline layout—keeping render passes clean and garbage-collection-free.
+
+				2. BUFFERS VS. BIND GROUPS
+						 • GPUBuffer: A raw block of reserved VRAM (the actual physical house).
+						 • GPUBindGroup: A set of street addresses pointing to those houses.
+						 • Optimization Rule: Allocate the house ONCE. Change the residents (bytes) 
+						     using `queue.writeBuffer()`. Re-creating bind groups frame-by-frame is 
+						     like re-building the map every time someone moves a chair.
+
+				3. SHADER DATA FLOW (CPU -> GPU)
+						[ JS Array ] --(queue.writeBuffer)--> [ VRAM Buffer ]
+						                                                 |
+						                                         (GPUBindGroup)
+						                                                 |
+						                                         [ WGSL Uniform ] --> Vertex Shader
+                                                     
+				4. MSAA (MULTI-SAMPLE ANTI-ALIASING) VS. DPR UPSCALING
+						 • The Trap: Scaling up your canvas width/height by devicePixelRatio (e.g., 2x or 3x) 
+						     multiplies your fragment shader workload quadratically ($N^2$), burning battery.
+						 • The MSAA Trick: Keep canvas backing at 1.0 DPR, but render into a 4x multisampled 
+						     offscreen texture. The GPU only calculates fragment lighting once per pixel cluster 
+						     while super-sampling geometry edges.
+						 • The Resolve: WebGPU automatically downsamples (resolves) the 4x buffer into 
+						     the main canvas view via `resolveTarget`, giving you crisp vector/triangle lines 
+						     for zero extra fill-rate cost.
+                                                     
+
+		     +---------------------------------------------------------------------------+
+				 |                          DATA ARCHITECTURE & VISUALS                      |
+				 +---------------------------------------------------------------------------+
+
+					  STATIC SETUP (Run Once)                     HOT RENDER LOOP (Per Frame)
+				 +-------------------------+                 +-------------------------+
+				 |  setupBuffersAndBindGroup |               |        drawCube         |
+			   +-------------------------+                 +-------------------------+
+						            |                                           |
+				 +------------+------------+                     [ Float32Array ]
+					   |            |            |                            |
+					   v            v            v                            v
+				  [projMatrix] [vertices] [angles]               wgpu.queue.writeBuffer()
+						(VRAM)       (VRAM)     (VRAM)                          |
+						  |            |          |                             v
+				 +------------+----------+                    Overwrites VRAM Bytes
+						       |                               (Zero CPU Re-allocation!)
+						       v                                         |
+						[ GPUBindGroup ]                                 v
+						       |                              wgpu.pass.setBindGroup(0)
+						       v                                       |
+				 +--------------+                                  v
+				 | Render Pass  |<------------------------ wgpu.pass.draw(36)
+				 +--------------+
+         
+
+					  MSAA RENDER PIPELINE FLOW (4x Anti-Aliasing)
+				 +-----------------------------------------------------+
+				 |                 wgpu.textures.msaa                  |
+				 |             (Offscreen VRAM Buffer - 4x)            |
+				 +-----------------------------------------------------+
+				            |                                 |
+				   (Color Attachment)                (Depth Attachment)
+				            |                                 |
+				            v                                 v
+				    [ Render Pass ] <------------------- [ Depth Buffer ]
+				            |                          (depth24plus, 4x)
+				            | 
+				    (GPU Resolve Step)
+				            |
+				            v
+				 +-----------------------------------------------------+
+				 |             brush.getCurrentTexture()               |
+				 |               (Onscreen Canvas - 1.0 DPR)           |
+				 +-----------------------------------------------------+
+         
+
+				 +---------------------------------------------------------------------------+
+				 |                         CRITICAL LESSONS LEARNED                          |
+				 +---------------------------------------------------------------------------+
+
+				 [!] Memory Stride & Layout
+						   • Using plain JS array literals `[x, y, z, w]` for vertex points avoids 
+						        creating dozens of micro TypedArray objects on the heap during setup.
+						   • Consolidate everything into a single `Float32Array` write at boundary.
+
+				 [!] Pass Drawing Parameters
+						      • `draw(36)` is shorthand for `draw(36, 1, 0, 0)`:
+						        (vertexCount: 36, instanceCount: 1, firstVertex: 0, firstInstance: 0).
+
+		   =============================================================================
+
+       @acknowledgement
+        Google Gemini AI helped with notes, learning new concepts, comments & ASCII arts.
+        Ensure testing them out yourself & validating info provided (especially regarding GPU timestamps being undefined).
+		   */
+    </script>
+  </body>
+</html>
