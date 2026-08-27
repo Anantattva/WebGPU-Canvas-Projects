@@ -16,6 +16,7 @@ Files worth reading are:
   - [WebGPU Rotating Cube](Cube_V3.html)
   - [WebGPU Tetrahedron](Tetrahedron.html)
   - [WebGPU Colour Visualizer](ColourVisualizer_WebGPU.html)
+  - [WebGPU Circle](Circle.html)
   - [WebGPU Triangle](WebGPUBasics3.html)
   - [3D Cube in 2D Canvas](Canvas_3DCube_3.html)
 > Note: Colour Visualizer has mobile/tablet-only UI support.
