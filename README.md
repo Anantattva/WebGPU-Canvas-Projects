@@ -1,4 +1,4 @@
-# ++ WebGPU-Canvas-Projects ++
+# ++ WebGPU & Canvas2D Projects ++
 
 ## 🙏 Hello Everyone
 > ।। ॐ नमः शिवाय ।।
@@ -11,7 +11,7 @@ Most are incomplete & not working.
 
 ## 🎖 Good Files
 Files worth reading are:
-- First month:
+- 1st month:
   - [WebGPU Cube MSAA](CubeMSAA.html)
   - [WebGPU Rotating Cube](Cube_V3.html)
   - [WebGPU Tetrahedron](Tetrahedron.html)
@@ -19,6 +19,8 @@ Files worth reading are:
   - [WebGPU Circle](Circle.html)
   - [WebGPU Triangle](WebGPUBasics3.html)
   - [3D Cube in 2D Canvas](Canvas_3DCube_3.html)
+- 2nd Month
+  - [WebGPU Septagon](WebGPU_Septagon)
 > Note: Colour Visualizer has mobile/tablet-only UI support.
 
 > 🪁 *I have tried writing the best documentations, comments & explanations I could to make WebGPU understandable — even for beginners.*
