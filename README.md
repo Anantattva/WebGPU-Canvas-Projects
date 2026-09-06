@@ -21,6 +21,7 @@ Files worth reading are:
   - [3D Cube in 2D Canvas](Canvas_3DCube_3.html)
 - 2nd Month
   - [WebGPU Septagon](WebGPU_Septagon)
+  - [WebGPU Samplers](Samplers)
 > Note: Colour Visualizer has mobile/tablet-only UI support.
 
 > 🪁 *I have tried writing the best documentations, comments & explanations I could to make WebGPU understandable — even for beginners.*
