@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>
+      Image Processing via WebGPU: V1.0
+    </title>
+    <style>
+      body {
+        margin: 0;
+      }
+      #screen {
+        position: absolute;
+        margin: 0;
+        left: 50%;
+        top: 5%;
+        transform: translate3d(-50%, 0, 0);
+        width: 80vmin;
+        height: 80vh;
+        box-shadow: 0 0 2px 2px rgba(0, 0, 0, 0.3);
+        touch-action: none;
+      }
+      #input-bar {
+        position: absolute;
+        margin: 0;
+        left: 50%;
+        top: calc(5% + 80vh + 5%);
+        transform: translate3d(-50%, 0, 0);
+        width: 80vmin;
+        height: 5vh;
+        box-shadow: 0 0 2px 2px rgba(0, 0, 0, 0.3);
+        background-image: linear-gradient(
+          90deg, 
+          red,
+          orange,
+          yellow,
+          lime,
+          cyan,
+          blue,
+          magenta,
+          red
+        );
+      }
+      #input-cursor {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate3d(-50%, -50%, 0);
+        width: 5%;
+        height: 80%;
+        filter: drop-shadow(0 0 6px white);
+        touch-action: none;
+      }
+      #input-cursor::before {
+        position: absolute;
+        content: "";
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background: black;
+        clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+        touch-action: none;
+      }
+    </style>
+  </head>
+  <!-- This helps apply a colour filter to the input image -->
+  <!-- @date START 10th September, 2026 -->
+  <!-- @date END 10th September, 2026 -->
+  <!-- @outcome AMAZING!! GORGEOUS EFFECTS!! -->
+  <body>
+    <canvas id="screen"></canvas>
+    <div id="input-bar">
+      <div id="input-cursor"></div>
+    </div>
+  </body>  
+  <script type="module" src="Consciousness1.js"></script>
+</html>
