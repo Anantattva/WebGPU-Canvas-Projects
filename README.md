@@ -22,6 +22,7 @@ Files worth reading are:
 - 2nd Month
   - [WebGPU Septagon](WebGPU_Septagon)
   - [WebGPU Samplers](Samplers)
+  - [WebGPU Image Processing](ImageProcessing)
 > Note: Colour Visualizer has mobile/tablet-only UI support.
 
 > 🪁 *I have tried writing the best documentations, comments & explanations I could to make WebGPU understandable — even for beginners.*
