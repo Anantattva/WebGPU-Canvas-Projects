@@ -3,7 +3,7 @@
 ## 🙏 Hello Everyone
 > ।। ॐ नमः शिवाय ।।
 
-I am new to programming. Been 6 months since I started with JS and one-one month each to WebGPU & Rust.
+I am new to programming. Been 7 months since I started with JS and 3-3 month each to WebGPU & Rust.
 
 ## 🎬 Content
 Here I have posted all of my experimental & learning projects.
