@@ -24,6 +24,7 @@ Files worth reading are:
   - [WebGPU Samplers](Samplers)
   - [WebGPU Image Processing](ImageProcessing)
 - 3rd Month
+  - WebGPU Compute
   - [Quaternion Basics](QuaternionCube)
 > Note: Colour Visualizer has mobile/tablet-only UI support.
 
